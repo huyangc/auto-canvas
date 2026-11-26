@@ -88,6 +88,13 @@ export function EditorDialogs({
   netlistRootDocumentId,
   projectInfoOpen,
   setProjectInfoOpen,
+  cloudProjectsOpen,
+  setCloudProjectsOpen,
+  cloudProjectsBusy,
+  openCloudProjectById,
+  renameShelfProject,
+  deleteShelfProject,
+  reloadCloudProjects,
   cloudProjects,
   agentFileCandidate,
   cloudBinding,
@@ -178,6 +185,13 @@ export function EditorDialogs({
   netlistRootDocumentId: string | undefined;
   projectInfoOpen: boolean;
   setProjectInfoOpen: Dispatch<SetStateAction<boolean>>;
+  cloudProjectsOpen: boolean;
+  setCloudProjectsOpen: Dispatch<SetStateAction<boolean>>;
+  cloudProjectsBusy: boolean;
+  openCloudProjectById: ProjectFileLifecycle["openCloudProjectById"];
+  renameShelfProject: ProjectTabSessions["renameShelfProject"];
+  deleteShelfProject: ProjectTabSessions["deleteShelfProject"];
+  reloadCloudProjects: CloudProjects["reloadCloudProjects"];
   cloudProjects: CloudProjects["cloudProjects"];
   agentFileCandidate: AgentProjectResources["agentFileCandidate"];
   cloudBinding: ProjectFileLifecycle["cloudBinding"];
@@ -322,6 +336,18 @@ export function EditorDialogs({
               documentName: document.name,
               onSave: editProjectInfo,
               onClose: () => setProjectInfoOpen(false),
+            }
+          : null
+      }
+      cloudProjects={
+        cloudProjectsOpen && projectStore !== null
+          ? {
+              busy: cloudProjectsBusy,
+              onOpenProject: (id) => void openCloudProjectById(id, true),
+              onRenameProject: renameShelfProject,
+              onDeleteProject: deleteShelfProject,
+              onProjectsChanged: () => void reloadCloudProjects(),
+              onClose: () => setCloudProjectsOpen(false),
             }
           : null
       }

@@ -52,11 +52,7 @@ test("local identity saves, reopens from the shelf and lists the earlier revisio
       await expect(fresh.getByTestId("status")).toHaveText(
         `Saved ${name} updated to Cloud`,
       );
-      await (
-        await projectTabAction(fresh, "Open Cloud Project…")
-      )
-        .getByRole("button", { name: "Browse Cloud Projects…" })
-        .click();
+      await projectTabAction(fresh, "Open Cloud Project…");
       await fresh.getByTestId(`shelf-actions-${projectId}`).click();
       await fresh
         .getByRole("menuitem", { name: "Version history", exact: true })

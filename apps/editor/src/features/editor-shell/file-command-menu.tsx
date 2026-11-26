@@ -11,8 +11,6 @@ import {
 
 import { AccountContext } from "../../accounts/account-context";
 import { CommandSubmenu } from "./command-submenu";
-import type { CloudProjectSummary } from "./cloud-projects";
-import { ProjectShelf } from "./project-shelf";
 
 /**
  * The project tab strip's own actions. The strip hides with one project, so
@@ -22,16 +20,10 @@ export interface FileProjectTabActions {
   busy: boolean;
   onNew(): void;
   onOpenFile(): void;
+  /** Opens the Cloud Projects modal; Cloud only (omitted in accounts mode). */
+  onOpenCloudProjects?(): void;
   /** The active tab's ×: its decision gives focus back to the trigger. */
   onClose(trigger: HTMLElement | null): void;
-  /** The strip's Shelf picker, with its handlers; Cloud only. */
-  shelf?: {
-    projects: readonly CloudProjectSummary[];
-    onOpened(): void;
-    onOpen(id: string): void;
-    onRename(id: string, name: string): Promise<void>;
-    onDelete(id: string): Promise<void>;
-  };
 }
 
 export interface FileCommandMenuProps {
@@ -93,27 +85,22 @@ export function FileCommandMenu({
   projectTabs,
   embedded = false,
 }: FileCommandMenuProps) {
-  const [openSubmenu, setOpenSubmenu] = useState<
-    "import" | "export" | "shelf" | null
-  >(null);
-  // An accounts-mode editor lists the account's Cloud Projects in the user
-  // menu, so File leaves them out there.
+  const [openSubmenu, setOpenSubmenu] = useState<"import" | "export" | null>(
+    null,
+  );
+  // An accounts-mode editor opens Cloud Projects from the header user menu,
+  // so File leaves it out there.
   const account = useContext(AccountContext);
-  const shelf = cloudEnabled && !account ? projectTabs?.shelf : undefined;
+  const onOpenCloudProjects =
+    cloudEnabled && !account ? projectTabs?.onOpenCloudProjects : undefined;
   // Drawn inside the header's File menu, which stays mounted while closed:
-  // its submenus collapse when it closes, so the Shelf reloads on each open.
+  // its submenus collapse when it closes.
   const embeddedGroup = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const menu = embeddedGroup.current?.closest("details");
     if (!menu) return;
     const collapse = () => {
       if (menu.open) return;
-      // File never closes under the Shelf's open Browse dialog: hidden with
-      // File, the modal would leave the page inert behind nothing.
-      if (menu.querySelector("dialog[open]")) {
-        menu.open = true;
-        return;
-      }
       setOpenSubmenu(null);
     };
     menu.addEventListener("toggle", collapse);
@@ -126,9 +113,9 @@ export function FileCommandMenu({
     event.preventDefault();
     event.currentTarget.querySelector("input")?.click();
   };
-  // Private Cloud Projects are listed in the project tabs' Shelf. An
-  // accounts-mode editor shows it in the user menu (My Cloud Projects); a
-  // no-account editor shows it here too, as Open Cloud Project….
+  // Private Cloud Projects open in the Cloud Projects modal. An accounts-mode
+  // editor opens it from the user menu (My Cloud Projects); a no-account
+  // editor opens it here too, as Open Cloud Project….
   // The rows read as groups — project, tabs, save, transfer, and the saved
   // copy's own commands — and a separator falls only between two groups that
   // are drawn.
@@ -167,52 +154,15 @@ export function FileCommandMenu({
           >
             Open file in new tab
           </button>
-          {shelf ? (
-            <div>
-              <CommandSubmenu
-                id="file-shelf-options"
-                title="Open Cloud Project…"
-                // The strip's picker has the title as its name.
-                label="Cloud Projects"
-                open={openSubmenu === "shelf"}
-                onToggle={() => {
-                  if (openSubmenu !== "shelf") shelf.onOpened();
-                  setOpenSubmenu((current) =>
-                    current === "shelf" ? null : "shelf",
-                  );
-                }}
-                onClose={() => setOpenSubmenu(null)}
-              >
-                <div
-                  className="file-shelf"
-                  // The Shelf's own controls (rename, delete, browse) keep
-                  // File open, as they keep the strip's picker open; opening
-                  // a project closes the menu itself.
-                  onClick={(event) => event.stopPropagation()}
-                  onKeyDown={(event) => {
-                    // Every key typed in the Shelf's own fields, its inline
-                    // decisions or its Browse dialog stays there, as in the
-                    // strip's picker: the submenu's Left (collapse) and
-                    // File's Escape (close) would hide a field or an open
-                    // modal.
-                    if (
-                      (event.target as Element).closest(
-                        "input, textarea, select, dialog, .inline-confirm-decision",
-                      )
-                    )
-                      event.stopPropagation();
-                  }}
-                >
-                  <ProjectShelf
-                    projects={shelf.projects}
-                    busy={projectTabs.busy}
-                    onOpen={shelf.onOpen}
-                    onRename={shelf.onRename}
-                    onDelete={shelf.onDelete}
-                  />
-                </div>
-              </CommandSubmenu>
-            </div>
+          {onOpenCloudProjects ? (
+            <button
+              type="button"
+              aria-haspopup="dialog"
+              disabled={projectTabs.busy}
+              onClick={onOpenCloudProjects}
+            >
+              Open Cloud Project…
+            </button>
           ) : null}
           <button
             type="button"

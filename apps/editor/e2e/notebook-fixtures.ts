@@ -284,11 +284,9 @@ export function nextAuthMe(page: Page, user: NotebookUser): Promise<Response> {
   );
 }
 
-/** Opens the Shelf wall (Browse Cloud Projects…) and returns its dialog. */
+/** Opens the Cloud Projects dialog (`Open Cloud Project…`) and returns it. */
 export async function openShelfWall(page: Page): Promise<Locator> {
-  const shelf = await projectTabAction(page, "Open Cloud Project…");
-  await shelf.getByRole("button", { name: "Browse Cloud Projects…" }).click();
-  const dialog = page.getByRole("dialog", { name: "Cloud Projects" });
+  const dialog = await projectTabAction(page, "Open Cloud Project…");
   await expect(dialog).toBeVisible();
   return dialog;
 }

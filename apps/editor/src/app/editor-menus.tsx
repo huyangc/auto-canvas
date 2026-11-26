@@ -1,6 +1,5 @@
 import { createProjectImportLink } from "../document/project-import-link";
 import { serializeProject } from "@icm/project-protocol";
-import type { useCloudProjects } from "./use-cloud-projects";
 // The editor's menus bound to its commands: the header with its project tabs,
 // File and ⋯ menus and toolbars, and the canvas context menu.
 import {
@@ -65,7 +64,6 @@ type ProjectStructureCommands = ReturnType<
 type EditorDerivedModel = ReturnType<typeof useEditorDerivedModel>;
 type NavigationController = ReturnType<typeof createEditorNavigationController>;
 type FileCommands = ReturnType<typeof createEditorFileCommands>;
-type CloudProjects = ReturnType<typeof useCloudProjects>;
 type AgentConnection = ReturnType<typeof useEditorAgentConnection>;
 type ProjectTabSessions = ReturnType<typeof useProjectTabSessions>;
 
@@ -98,12 +96,9 @@ export function EditorMenuBar({
   documentSettingsOpen,
   setDocumentSettingsOpen,
   setProjectInfoOpen,
+  setCloudProjectsOpen,
   projectNameEditing,
-  cloudProjects,
-  reloadCloudProjects,
   cloudManagementBusy,
-  renameShelfProject,
-  deleteShelfProject,
   savedProjectBaseline,
   isDirtyWork,
   hasUnsavedChanges,
@@ -114,7 +109,6 @@ export function EditorMenuBar({
   revertToSavedProjectBaseline,
   openRecoveryDialog,
   openProjectFile,
-  openCloudProjectById,
   agentSession,
   openAgentConnection,
   tool,
@@ -184,12 +178,9 @@ export function EditorMenuBar({
   documentSettingsOpen: boolean;
   setDocumentSettingsOpen: Dispatch<SetStateAction<boolean>>;
   setProjectInfoOpen: Dispatch<SetStateAction<boolean>>;
+  setCloudProjectsOpen: Dispatch<SetStateAction<boolean>>;
   projectNameEditing: RefObject<boolean>;
-  cloudProjects: CloudProjects["cloudProjects"];
   cloudManagementBusy: ProjectTabSessions["cloudManagementBusy"];
-  renameShelfProject: ProjectTabSessions["renameShelfProject"];
-  deleteShelfProject: ProjectTabSessions["deleteShelfProject"];
-  reloadCloudProjects: CloudProjects["reloadCloudProjects"];
   savedProjectBaseline: ProjectFileLifecycle["savedProjectBaseline"];
   isDirtyWork: ProjectFileLifecycle["isDirtyWork"];
   hasUnsavedChanges: ProjectFileLifecycle["hasUnsavedChanges"];
@@ -200,7 +191,6 @@ export function EditorMenuBar({
   revertToSavedProjectBaseline: ProjectFileLifecycle["revertToSavedProjectBaseline"];
   openRecoveryDialog: ProjectFileLifecycle["openRecoveryDialog"];
   openProjectFile: ProjectFileLifecycle["openProjectFile"];
-  openCloudProjectById: ProjectFileLifecycle["openCloudProjectById"];
   agentSession: AgentConnection["agentSession"];
   openAgentConnection: AgentConnection["openAgentConnection"];
   tool: InteractionState["tool"];
@@ -278,13 +268,8 @@ export function EditorMenuBar({
     busy: projectTabs.busy || cloudManagementBusy,
     onNew: () => void projectTabs.open(() => createNewTabSession()),
     onOpenFile: () => tabProjectInputRef.current?.click(),
+    onOpenCloudProjects: () => setCloudProjectsOpen(true),
     onClose: (trigger: HTMLElement | null) => closeActiveTab.current?.(trigger),
-  };
-  const shelfActions = {
-    onOpened: () => void reloadCloudProjects(),
-    onOpen: (id: string) => void openCloudProjectById(id, true),
-    onRename: renameShelfProject,
-    onDelete: deleteShelfProject,
   };
   return (
     <EditorAppChrome
@@ -312,11 +297,7 @@ export function EditorMenuBar({
             }}
             onNew={tabActions.onNew}
             onOpenFile={tabActions.onOpenFile}
-            cloudProjects={cloudProjects}
-            onRenameShelf={shelfActions.onRename}
-            onDeleteShelf={shelfActions.onDelete}
-            onShelfOpened={shelfActions.onOpened}
-            onOpenShelf={shelfActions.onOpen}
+            onOpenCloudProjects={tabActions.onOpenCloudProjects}
           />
           <input
             ref={tabProjectInputRef}
@@ -334,13 +315,12 @@ export function EditorMenuBar({
       }
       projectName={project.name}
       hasUnsavedWork={hasUnsavedChanges()}
-      // Accounts mode lists the Shelf in the user menu instead of File.
+      // Accounts mode opens Cloud Projects from the user menu instead of File.
       {...(projectStore
         ? {
             accountCloudProjects: {
-              projects: cloudProjects,
               busy: tabActions.busy,
-              ...shelfActions,
+              onOpenDialog: tabActions.onOpenCloudProjects,
             },
           }
         : {})}
@@ -381,10 +361,7 @@ export function EditorMenuBar({
         onRevert: revertToSavedProjectBaseline,
         onOpenRecovery: openRecoveryDialog,
         onOpenInfo: () => setProjectInfoOpen(true),
-        projectTabs: {
-          ...tabActions,
-          shelf: { projects: cloudProjects, ...shelfActions },
-        },
+        projectTabs: tabActions,
       }}
       searchOpen={searchOpen}
       selectionFilterOpen={selectionFilterOpen}

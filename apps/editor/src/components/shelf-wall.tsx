@@ -32,10 +32,9 @@ import { Masonry } from "./masonry";
 import { downloadBlob } from "../hosts/download-link";
 
 /**
- * "My shelf": a member's own saved circuits as a wall rather than a list of
- * names in a menu. Every tile is private — the worker scopes both the listing
- * and each thumbnail to the signed-in account — so the shelf is a personal
- * library of Cloud Projects.
+ * Cloud Projects browser: a member's own saved circuits as a searchable,
+ * filterable wall or compact list. Every item is private — the worker scopes
+ * both the listing and each thumbnail to the signed-in account.
  */
 
 export type ShelfState =
@@ -47,6 +46,37 @@ export type ShelfState =
       projects: readonly CloudProjectSummary[];
       limit: number;
     };
+
+export interface ShelfWallProps {
+  /** Opens a project inside the editor (new tab) instead of navigating. */
+  onOpenProject?: ((id: string) => void) | undefined;
+  /** Syncs a rename with open editor tabs; falls back to direct API edit when omitted. */
+  onRenameProject?: ((id: string, name: string) => Promise<void>) | undefined;
+  /** Syncs a delete with open editor tabs; falls back to direct API delete when omitted. */
+  onDeleteProject?: ((id: string) => Promise<void>) | undefined;
+  /** Notifies the host after mutations outside the tab-sync callbacks (duplicate, favorite, restore). */
+  onProjectsChanged?: (() => void) | undefined;
+  /** Disables opening and mutations while an editor tab operation is in flight. */
+  busy?: boolean | undefined;
+}
+
+type ShelfViewMode = "grid" | "list";
+
+const VIEW_MODE_STORAGE_KEY = "auto-canvas.cloud-projects-view.v1";
+
+function readInitialViewMode(): ShelfViewMode {
+  try {
+    if (
+      typeof window !== "undefined" &&
+      typeof window.localStorage?.getItem === "function" &&
+      window.localStorage.getItem(VIEW_MODE_STORAGE_KEY) === "list"
+    )
+      return "list";
+  } catch {
+    // Storage may be unavailable in restricted contexts.
+  }
+  return "grid";
+}
 
 export async function loadShelf(
   fetchLike: typeof fetch = fetch,
@@ -98,7 +128,111 @@ function useSingleColumn(): boolean {
   return single;
 }
 
-export function ShelfWall() {
+function SearchIcon() {
+  return (
+    <svg
+      className="shelf-icon"
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="7" cy="7" r="4.5" />
+      <path d="M10.5 10.5L14 14" />
+    </svg>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg
+      className="shelf-icon"
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M11.4 2.6a1.4 1.4 0 0 1 2 2L5.5 12.5 2.5 13.5l1-3 7.9-7.9z" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg
+      className="shelf-icon"
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M2.5 4.25h11M6 4.25V2.75a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 .75.75v1.5M4.5 4.25l.6 8.5a1 1 0 0 0 1 .95h3.8a1 1 0 0 0 1-.95l.6-8.5" />
+    </svg>
+  );
+}
+
+function GridViewIcon() {
+  return (
+    <svg
+      className="shelf-icon"
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="2.25" y="2.25" width="4.5" height="4.5" rx="0.8" />
+      <rect x="9.25" y="2.25" width="4.5" height="4.5" rx="0.8" />
+      <rect x="2.25" y="9.25" width="4.5" height="4.5" rx="0.8" />
+      <rect x="9.25" y="9.25" width="4.5" height="4.5" rx="0.8" />
+    </svg>
+  );
+}
+
+function ListViewIcon() {
+  return (
+    <svg
+      className="shelf-icon"
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M2.5 4h11M2.5 8h11M2.5 12h11" />
+    </svg>
+  );
+}
+
+export function ShelfWall({
+  onOpenProject,
+  onRenameProject,
+  onDeleteProject,
+  onProjectsChanged,
+  busy = false,
+}: ShelfWallProps) {
   const [state, setState] = useState<ShelfState>({ status: "loading" });
   const singleColumn = useSingleColumn();
   const [history, setHistory] = useState<CloudProjectSummary | null>(null);
@@ -106,6 +240,7 @@ export function ShelfWall() {
   const favoriteButtons = useRef(new Map<string, HTMLButtonElement>());
   const favoritesFilter = useRef<HTMLButtonElement>(null);
   const pendingFavoriteFocus = useRef<string | null>(null);
+  const controlsBusy = busy || busyId !== null;
 
   useEffect(() => {
     const cancelOnFocusChange = (event: FocusEvent) => {
@@ -135,23 +270,37 @@ export function ShelfWall() {
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(
     null,
   );
-
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   // Which tiles the wall shows; a view choice, so it is not saved.
   const [filter, setFilter] = useState<"all" | "favorites">("all");
+  const [viewMode, setViewMode] = useState<ShelfViewMode>(readInitialViewMode);
   const [menu, setMenu] = useState<{
     project: CloudProjectSummary;
     x: number;
     y: number;
   } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  // A filter change can hide the tile whose menu is open (a keyboard switch
-  // fires no outside pointerdown), so it closes the menu too.
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  // A filter or view change can hide the tile whose menu is open (a keyboard
+  // switch fires no outside pointerdown), so it closes the menu too.
   function showFilter(next: "all" | "favorites") {
     setMenu(null);
     setFilter(next);
   }
-  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  function changeViewMode(next: ShelfViewMode) {
+    setMenu(null);
+    setViewMode(next);
+    try {
+      if (typeof window.localStorage?.setItem === "function")
+        window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, next);
+    } catch {
+      // Ignore storage errors.
+    }
+  }
+
   useEffect(() => {
     if (!menu) return;
     menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
@@ -164,24 +313,36 @@ export function ShelfWall() {
     };
     const key = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
         setMenu(null);
         menuButtonRef.current?.focus();
       }
     };
     window.addEventListener("pointerdown", outside);
-    window.addEventListener("keydown", key);
+    window.addEventListener("keydown", key, true);
     return () => {
       window.removeEventListener("pointerdown", outside);
-      window.removeEventListener("keydown", key);
+      window.removeEventListener("keydown", key, true);
     };
   }, [menu]);
-  const showMenu = (project: CloudProjectSummary, x: number, y: number) => {
-    setMenu({
-      project,
-      x: Math.max(8, Math.min(x, window.innerWidth - 220)),
-      y: Math.max(8, Math.min(y, window.innerHeight - 290)),
-    });
+
+  const showMenu = (project: CloudProjectSummary, rect: DOMRect) => {
+    const menuWidth = 210;
+    const menuHeight = 290;
+    const x =
+      rect.left + menuWidth <= window.innerWidth - 8
+        ? Math.max(8, rect.left)
+        : Math.max(8, rect.right - menuWidth);
+    const fitsBelow = rect.bottom + menuHeight <= window.innerHeight - 8;
+    const y = fitsBelow
+      ? rect.bottom
+      : rect.top - menuHeight >= 8
+        ? rect.top - menuHeight
+        : Math.max(8, window.innerHeight - menuHeight);
+    setMenu({ project, x, y });
   };
+
   const replaceSummary = (project: CloudProjectSummary) =>
     setState((current) =>
       current.status === "ready"
@@ -194,6 +355,18 @@ export function ShelfWall() {
           }
         : current,
     );
+
+  const refresh = useCallback(() => {
+    let cancelled = false;
+    void loadShelf().then((next) => {
+      if (!cancelled) setState(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => refresh(), [refresh]);
 
   const historySource = useMemo<VersionHistorySource | undefined>(() => {
     if (!history) return undefined;
@@ -248,11 +421,12 @@ export function ShelfWall() {
             `Could not create a Shelf branch (${result.status}).`,
           );
         replaceSummary(result.project);
+        onProjectsChanged?.();
         setHistory(null);
         return true;
       },
     };
-  }, [history]);
+  }, [history, onProjectsChanged]);
 
   async function act(
     project: CloudProjectSummary,
@@ -260,7 +434,7 @@ export function ShelfWall() {
     renamed?: string,
   ) {
     setMenu(null);
-    if (busyId) return;
+    if (controlsBusy) return;
     const name = renamed?.trim();
     if (action === "rename" && (!name || name === project.name)) {
       setRenaming(null);
@@ -276,6 +450,7 @@ export function ShelfWall() {
     try {
       if (action === "favorite") {
         replaceSummary(await setShelfFavorite(project.id, !project.favorite));
+        onProjectsChanged?.();
       } else if (action === "export") {
         const loaded = await openCloudProject(project.id);
         if (loaded.status !== "opened")
@@ -290,6 +465,23 @@ export function ShelfWall() {
           new Blob([loaded.project.projectText], { type: "application/json" }),
           `${loaded.project.name.replace(/[\\/:*?"<>|]/gu, "_")}.icproj.json`,
         );
+      } else if (action === "rename" && onRenameProject) {
+        await onRenameProject(project.id, name!);
+        setState((current) =>
+          current.status === "ready"
+            ? {
+                ...current,
+                projects: current.projects.map((item) =>
+                  item.id === project.id ? { ...item, name: name! } : item,
+                ),
+              }
+            : current,
+        );
+        setRenaming(null);
+        void loadShelf().then((next) => {
+          if (next.status === "ready") setState(next);
+        });
+        requestAnimationFrame(() => menuButtonRef.current?.focus());
       } else {
         const result = await editShelfProject(
           project.id,
@@ -299,6 +491,7 @@ export function ShelfWall() {
         );
         if (result.status === "saved") {
           replaceSummary(result.project);
+          onProjectsChanged?.();
           setRenaming(null);
           if (action === "rename")
             requestAnimationFrame(() => menuButtonRef.current?.focus());
@@ -325,42 +518,55 @@ export function ShelfWall() {
     }
   }
 
-  const refresh = useCallback(() => {
-    let cancelled = false;
-    void loadShelf().then((next) => {
-      if (!cancelled) setState(next);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => refresh(), [refresh]);
-
   async function removeProject(project: CloudProjectSummary): Promise<void> {
-    if (busyId) return;
+    if (controlsBusy) return;
     setBusyId(project.id);
-    const outcome = await deleteCloudProject(project.id);
-    setBusyId(null);
-    if (outcome.status === "deleted") {
-      // An editor tab of it, when this browser tab returns to the editor,
-      // becomes an unsaved draft instead of a saved Project that is gone.
-      noteCloudProjectDeleted(project.id);
-      setState((current) =>
-        current.status === "ready"
-          ? { ...current, projects: outcome.projects }
-          : current,
-      );
-    } else {
-      setError(outcome.message);
-      throw new Error(outcome.message);
+    setError(null);
+    try {
+      if (onDeleteProject) {
+        await onDeleteProject(project.id);
+        setState((current) =>
+          current.status === "ready"
+            ? {
+                ...current,
+                projects: current.projects.filter(
+                  (item) => item.id !== project.id,
+                ),
+              }
+            : current,
+        );
+        return;
+      }
+      const outcome = await deleteCloudProject(project.id);
+      if (outcome.status === "deleted") {
+        // An editor tab of it, when this browser tab returns to the editor,
+        // becomes an unsaved draft instead of a saved Project that is gone.
+        noteCloudProjectDeleted(project.id);
+        setState((current) =>
+          current.status === "ready"
+            ? { ...current, projects: outcome.projects }
+            : current,
+        );
+      } else {
+        setError(outcome.message);
+        throw new Error(outcome.message);
+      }
+    } catch (cause) {
+      const message =
+        cause instanceof Error
+          ? cause.message
+          : "Could not delete this Project.";
+      setError(message);
+      throw cause instanceof Error ? cause : new Error(message);
+    } finally {
+      setBusyId(null);
     }
   }
 
   if (state.status === "loading") {
     return (
       <p className="shelf-status" data-testid="shelf-loading">
-        Loading your shelf…
+        Loading your Cloud Projects…
       </p>
     );
   }
@@ -368,8 +574,8 @@ export function ShelfWall() {
   if (state.status === "signed-out") {
     return (
       <p className="shelf-status" data-testid="shelf-signed-out">
-        Sign in to keep your own shelf. Circuits you save there stay private to
-        your account.
+        Sign in to keep your own Cloud Projects. Circuits you save stay private
+        to your account.
       </p>
     );
   }
@@ -377,7 +583,7 @@ export function ShelfWall() {
   if (state.status === "unreachable") {
     return (
       <p className="shelf-status" data-testid="shelf-unreachable">
-        Could not reach your shelf: {state.message}
+        Could not reach Cloud Projects: {state.message}
       </p>
     );
   }
@@ -385,16 +591,166 @@ export function ShelfWall() {
   if (state.projects.length === 0) {
     return (
       <p className="shelf-status" data-testid="shelf-empty">
-        Your shelf is empty. Open the <a href={appUrl("editor")}>editor</a>,
-        draw something, and use File → Save to keep it here.
+        No saved Cloud Projects yet.{" "}
+        {onOpenProject ? (
+          "Draw a circuit and use File → Save to keep it here."
+        ) : (
+          <>
+            Open the <a href={appUrl("editor")}>editor</a>, draw something, and
+            use File → Save to keep it here.
+          </>
+        )}
       </p>
     );
   }
 
-  const shown =
-    filter === "favorites"
-      ? state.projects.filter((project) => project.favorite)
-      : state.projects;
+  const trimmedQuery = searchQuery.trim().toLowerCase();
+  const shown = [...state.projects]
+    .filter((project) => {
+      if (filter === "favorites" && !project.favorite) return false;
+      if (trimmedQuery && !project.name.toLowerCase().includes(trimmedQuery))
+        return false;
+      return true;
+    })
+    .sort(
+      (a, b) =>
+        Number(!!b.favorite) - Number(!!a.favorite) ||
+        b.updatedAt.localeCompare(a.updatedAt) ||
+        a.id.localeCompare(b.id),
+    );
+
+  const renderHeartButton = (project: CloudProjectSummary) => (
+    <button
+      type="button"
+      ref={(button) => {
+        if (button) favoriteButtons.current.set(project.id, button);
+        else favoriteButtons.current.delete(project.id);
+      }}
+      className="shelf-tile-favorite"
+      aria-label={`Favorite ${project.name}`}
+      aria-pressed={!!project.favorite}
+      title={project.favorite ? "Remove favorite" : "Favorite"}
+      data-testid={`shelf-favorite-${project.id}`}
+      disabled={controlsBusy}
+      onClick={() => void act(project, "favorite")}
+    >
+      {project.favorite ? "♥" : "♡"}
+    </button>
+  );
+
+  const renderActionBar = (
+    project: CloudProjectSummary,
+    variant: "card" | "list",
+  ) => (
+    <div
+      className={
+        variant === "card" ? "shelf-tile-footer" : "shelf-list-actions"
+      }
+    >
+      <div className="shelf-quick-actions">
+        {renderHeartButton(project)}
+        <button
+          type="button"
+          className="shelf-action-btn"
+          aria-label={`Rename ${project.name}`}
+          title="Rename"
+          disabled={controlsBusy}
+          onClick={(event) => {
+            menuButtonRef.current = event.currentTarget;
+            setMenu(null);
+            setError(null);
+            setRenaming({ id: project.id, name: project.name });
+          }}
+        >
+          <PencilIcon />
+          {variant === "card" ? <span>Rename</span> : null}
+        </button>
+        <InlineConfirm
+          className="shelf-action-btn shelf-action-delete"
+          data-testid={`shelf-quick-delete-${project.id}`}
+          aria-label={`Delete ${project.name}`}
+          title="Delete"
+          disabled={controlsBusy}
+          onConfirm={() => removeProject(project)}
+        >
+          <TrashIcon />
+        </InlineConfirm>
+      </div>
+      <button
+        type="button"
+        className="shelf-tile-actions"
+        aria-label={`Actions for ${project.name}`}
+        aria-haspopup="menu"
+        aria-expanded={menu?.project.id === project.id}
+        data-testid={`shelf-actions-${project.id}`}
+        disabled={controlsBusy}
+        onClick={(event) => {
+          menuButtonRef.current = event.currentTarget;
+          if (menu?.project.id === project.id) {
+            setMenu(null);
+            return;
+          }
+          showMenu(project, event.currentTarget.getBoundingClientRect());
+        }}
+      >
+        •••
+      </button>
+    </div>
+  );
+
+  const renderRenameForm = (project: CloudProjectSummary) => (
+    <form
+      className="shelf-rename-form"
+      autoComplete="off"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void act(project, "rename", renaming?.name ?? project.name);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && !controlsBusy) {
+          event.preventDefault();
+          event.stopPropagation();
+          setRenaming(null);
+          menuButtonRef.current?.focus();
+        }
+      }}
+    >
+      <input
+        aria-label="Project name"
+        autoComplete="off"
+        autoFocus
+        maxLength={120}
+        value={renaming?.name ?? project.name}
+        disabled={controlsBusy}
+        onChange={(event) =>
+          setRenaming({
+            id: project.id,
+            name: event.target.value,
+          })
+        }
+      />
+      <span className="shelf-rename-actions">
+        <button
+          type="submit"
+          className="shelf-rename-save"
+          disabled={controlsBusy || !(renaming?.name ?? "").trim()}
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          disabled={controlsBusy}
+          onClick={() => {
+            setRenaming(null);
+            menuButtonRef.current?.focus();
+          }}
+        >
+          Cancel
+        </button>
+      </span>
+    </form>
+  );
+
   return (
     <section className="shelf-wall" data-testid="shelf-wall">
       {error ? (
@@ -403,50 +759,223 @@ export function ShelfWall() {
         </p>
       ) : null}
       <div className="shelf-count-row">
-        <p className="shelf-count" data-testid="shelf-count">
-          {state.projects.length} of {state.limit} saved · only you can see
-          these
-        </p>
-        <div className="shelf-filter" role="group" aria-label="Show circuits">
-          <button
-            type="button"
-            aria-pressed={filter === "all"}
-            onClick={() => showFilter("all")}
+        <div className="shelf-toolbar-controls">
+          <div className="shelf-search-wrap">
+            <SearchIcon />
+            <input
+              type="search"
+              className="shelf-search-input"
+              aria-label="Search cloud projects"
+              placeholder="Search projects…"
+              value={searchQuery}
+              onChange={(event) => {
+                setMenu(null);
+                setSearchQuery(event.currentTarget.value);
+              }}
+            />
+            {searchQuery ? (
+              <button
+                type="button"
+                className="shelf-search-clear"
+                aria-label="Clear search"
+                title="Clear search"
+                onClick={() => setSearchQuery("")}
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
+          <div className="shelf-filter" role="group" aria-label="Show circuits">
+            <button
+              type="button"
+              aria-pressed={filter === "all"}
+              onClick={() => showFilter("all")}
+            >
+              All
+            </button>
+            <button
+              type="button"
+              aria-pressed={filter === "favorites"}
+              ref={favoritesFilter}
+              data-testid="shelf-filter-favorites"
+              onClick={() => showFilter("favorites")}
+            >
+              <span aria-hidden="true">♥</span> Favorites
+            </button>
+          </div>
+        </div>
+        <div className="shelf-toolbar-meta">
+          <p className="shelf-count" data-testid="shelf-count">
+            {trimmedQuery ? `${shown.length} matching · ` : ""}
+            {state.projects.length} of {state.limit} saved · only you can see
+            these
+          </p>
+          <div
+            className="shelf-view-switch"
+            role="group"
+            aria-label="View mode"
           >
-            All
-          </button>
-          <button
-            type="button"
-            aria-pressed={filter === "favorites"}
-            ref={favoritesFilter}
-            data-testid="shelf-filter-favorites"
-            onClick={() => showFilter("favorites")}
-          >
-            <span aria-hidden="true">♥</span> Favorites
-          </button>
+            <button
+              type="button"
+              aria-label="Grid view"
+              title="Grid view"
+              aria-pressed={viewMode === "grid"}
+              onClick={() => changeViewMode("grid")}
+            >
+              <GridViewIcon />
+            </button>
+            <button
+              type="button"
+              aria-label="List view"
+              title="List view"
+              aria-pressed={viewMode === "list"}
+              onClick={() => changeViewMode("list")}
+            >
+              <ListViewIcon />
+            </button>
+          </div>
         </div>
       </div>
+
       {shown.length === 0 ? (
-        <p className="shelf-status" data-testid="shelf-no-favorites">
-          No favorites yet — click ♡ next to a circuit&apos;s name.
-        </p>
+        filter === "favorites" && !trimmedQuery ? (
+          <p className="shelf-status" data-testid="shelf-no-favorites">
+            No favorites yet — click ♡ next to a circuit&apos;s name.
+          </p>
+        ) : (
+          <div className="shelf-empty-filter" data-testid="shelf-empty-filter">
+            <p>No projects matching &ldquo;{searchQuery.trim()}&rdquo;.</p>
+            <button
+              type="button"
+              className="shelf-reset-filter"
+              onClick={() => {
+                setSearchQuery("");
+                setFilter("all");
+              }}
+            >
+              Show all projects
+            </button>
+          </div>
+        )
+      ) : viewMode === "list" ? (
+        <div
+          className="shelf-list"
+          role="list"
+          aria-label="Cloud Projects"
+          data-testid="shelf-list"
+        >
+          {shown.map((project) => (
+            <div className="shelf-list-row" role="listitem" key={project.id}>
+              {renaming?.id === project.id ? (
+                renderRenameForm(project)
+              ) : (
+                <>
+                  {onOpenProject ? (
+                    <button
+                      type="button"
+                      className="shelf-list-open"
+                      aria-label={project.name}
+                      data-testid={`shelf-tile-${project.id}`}
+                      disabled={controlsBusy}
+                      onClick={() => onOpenProject(project.id)}
+                    >
+                      <span className="shelf-list-thumb">
+                        <TilePreview
+                          key={`${project.id}-${project.revision}`}
+                          src={cloudProjectPreviewUrl(
+                            project.id,
+                            project.revision,
+                          )}
+                          alt={`Preview of ${project.name}`}
+                        />
+                      </span>
+                      <span className="shelf-list-copy">
+                        <span className="shelf-tile-name">{project.name}</span>
+                        <span className="shelf-tile-meta">
+                          <time dateTime={project.updatedAt}>
+                            {formatUpdatedAt(project.updatedAt)}
+                          </time>
+                          {" · "}
+                          <span className="shelf-tile-revision">
+                            revision {project.revision}
+                          </span>
+                        </span>
+                      </span>
+                    </button>
+                  ) : (
+                    <a
+                      className="shelf-list-open"
+                      href={shelfProjectHref(project.id)}
+                      data-testid={`shelf-tile-${project.id}`}
+                    >
+                      <span className="shelf-list-thumb">
+                        <TilePreview
+                          key={`${project.id}-${project.revision}`}
+                          src={cloudProjectPreviewUrl(
+                            project.id,
+                            project.revision,
+                          )}
+                          alt={`Preview of ${project.name}`}
+                        />
+                      </span>
+                      <span className="shelf-list-copy">
+                        <span className="shelf-tile-name">{project.name}</span>
+                        <span className="shelf-tile-meta">
+                          <time dateTime={project.updatedAt}>
+                            {formatUpdatedAt(project.updatedAt)}
+                          </time>
+                          {" · "}
+                          <span className="shelf-tile-revision">
+                            revision {project.revision}
+                          </span>
+                        </span>
+                      </span>
+                    </a>
+                  )}
+                  {renderActionBar(project, "list")}
+                </>
+              )}
+            </div>
+          ))}
+        </div>
       ) : (
         <Masonry
           aria-label="Circuits on your shelf"
           // Wider than any container below the breakpoint, so the wall falls to
           // one column there.
           minColumnWidth={singleColumn ? 701 : 250}
-          items={[...shown]
-            .sort(
-              (a, b) =>
-                Number(!!b.favorite) - Number(!!a.favorite) ||
-                b.updatedAt.localeCompare(a.updatedAt) ||
-                a.id.localeCompare(b.id),
-            )
-            .map((project) => ({
-              key: project.id,
-              node: (
-                <div className="shelf-tile-wrap">
+          items={shown.map((project) => ({
+            key: project.id,
+            node: (
+              <div className="shelf-tile-wrap">
+                {onOpenProject ? (
+                  <button
+                    type="button"
+                    className="shelf-tile"
+                    aria-label={project.name}
+                    data-testid={`shelf-tile-${project.id}`}
+                    disabled={controlsBusy}
+                    onClick={() => onOpenProject(project.id)}
+                  >
+                    <TilePreview
+                      key={`${project.id}-${project.revision}`}
+                      src={cloudProjectPreviewUrl(project.id, project.revision)}
+                      alt={`Preview of ${project.name}`}
+                    />
+                    <span className="shelf-tile-copy">
+                      <span className="shelf-tile-name">{project.name}</span>
+                      <span className="shelf-tile-meta">
+                        <time dateTime={project.updatedAt}>
+                          {formatUpdatedAt(project.updatedAt)}
+                        </time>
+                        {" · "}
+                        <span className="shelf-tile-revision">
+                          revision {project.revision}
+                        </span>
+                      </span>
+                    </span>
+                  </button>
+                ) : (
                   <a
                     className="shelf-tile"
                     href={shelfProjectHref(project.id)}
@@ -457,112 +986,29 @@ export function ShelfWall() {
                       src={cloudProjectPreviewUrl(project.id, project.revision)}
                       alt={`Preview of ${project.name}`}
                     />
-                    <span className="shelf-tile-name">{project.name}</span>
-                    <span className="shelf-tile-meta">
-                      <time dateTime={project.updatedAt}>
-                        {formatUpdatedAt(project.updatedAt)}
-                      </time>
-                      {" · "}
-                      <span className="shelf-tile-revision">
-                        revision {project.revision}
+                    <span className="shelf-tile-copy">
+                      <span className="shelf-tile-name">{project.name}</span>
+                      <span className="shelf-tile-meta">
+                        <time dateTime={project.updatedAt}>
+                          {formatUpdatedAt(project.updatedAt)}
+                        </time>
+                        {" · "}
+                        <span className="shelf-tile-revision">
+                          revision {project.revision}
+                        </span>
                       </span>
                     </span>
                   </a>
-                  {/* A sibling of the card's link, not inside it: the grid in
-                    shelf-wall.css places it at the end of the name's row. */}
-                  <button
-                    type="button"
-                    ref={(button) => {
-                      if (button)
-                        favoriteButtons.current.set(project.id, button);
-                      else favoriteButtons.current.delete(project.id);
-                    }}
-                    className="shelf-tile-favorite"
-                    aria-label={`Favorite ${project.name}`}
-                    aria-pressed={!!project.favorite}
-                    title={project.favorite ? "Remove favorite" : "Favorite"}
-                    data-testid={`shelf-favorite-${project.id}`}
-                    disabled={busyId !== null}
-                    onClick={() => void act(project, "favorite")}
-                  >
-                    {project.favorite ? "♥" : "♡"}
-                  </button>
-                  <button
-                    type="button"
-                    className="shelf-tile-actions"
-                    aria-label={`Actions for ${project.name}`}
-                    aria-haspopup="menu"
-                    aria-expanded={menu?.project.id === project.id}
-                    data-testid={`shelf-actions-${project.id}`}
-                    disabled={busyId !== null}
-                    onClick={(event) => {
-                      menuButtonRef.current = event.currentTarget;
-                      if (menu?.project.id === project.id) {
-                        setMenu(null);
-                        return;
-                      }
-                      const rect = event.currentTarget.getBoundingClientRect();
-                      showMenu(project, rect.left, rect.bottom);
-                    }}
-                  >
-                    •••
-                  </button>
-                  {renaming?.id === project.id ? (
-                    <form
-                      className="shelf-rename-form"
-                      autoComplete="off"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        void act(project, "rename", renaming.name);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Escape" && busyId === null) {
-                          event.preventDefault();
-                          setRenaming(null);
-                          menuButtonRef.current?.focus();
-                        }
-                      }}
-                    >
-                      <input
-                        aria-label="Project name"
-                        autoComplete="off"
-                        autoFocus
-                        maxLength={120}
-                        value={renaming.name}
-                        disabled={busyId !== null}
-                        onChange={(event) =>
-                          setRenaming({
-                            id: project.id,
-                            name: event.target.value,
-                          })
-                        }
-                      />
-                      <span className="shelf-rename-actions">
-                        <button
-                          type="submit"
-                          className="shelf-rename-save"
-                          disabled={busyId !== null || !renaming.name.trim()}
-                        >
-                          Save
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busyId !== null}
-                          onClick={() => {
-                            setRenaming(null);
-                            menuButtonRef.current?.focus();
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      </span>
-                    </form>
-                  ) : null}
-                </div>
-              ),
-            }))}
+                )}
+                {renaming?.id === project.id
+                  ? renderRenameForm(project)
+                  : renderActionBar(project, "card")}
+              </div>
+            ),
+          }))}
         />
       )}
+
       {history && historySource ? (
         <VersionHistoryDialog
           entryId={history.id}
@@ -571,10 +1017,12 @@ export function ShelfWall() {
           onClose={() => setHistory(null)}
           onRestored={() => {
             setHistory(null);
+            onProjectsChanged?.();
             void refresh();
           }}
         />
       ) : null}
+
       {menu ? (
         <div
           className="shelf-context-menu"
@@ -628,7 +1076,7 @@ export function ShelfWall() {
           <button
             role="menuitem"
             type="button"
-            disabled={busyId !== null}
+            disabled={controlsBusy}
             onClick={() => void act(menu.project, "duplicate")}
           >
             Duplicate
@@ -636,7 +1084,7 @@ export function ShelfWall() {
           <button
             role="menuitem"
             type="button"
-            disabled={busyId !== null}
+            disabled={controlsBusy}
             onClick={() => {
               setRenaming({ id: menu.project.id, name: menu.project.name });
               setMenu(null);
@@ -647,7 +1095,7 @@ export function ShelfWall() {
           <button
             role="menuitem"
             type="button"
-            disabled={busyId !== null}
+            disabled={controlsBusy}
             onClick={() => void act(menu.project, "export")}
           >
             Export
@@ -661,7 +1109,7 @@ export function ShelfWall() {
             className="shelf-menu-delete"
             data-testid={`shelf-delete-${menu.project.id}`}
             aria-label={`Delete ${menu.project.name} from your shelf`}
-            disabled={busyId !== null}
+            disabled={controlsBusy}
             onConfirm={async () => {
               const target = menu.project;
               await removeProject(target);

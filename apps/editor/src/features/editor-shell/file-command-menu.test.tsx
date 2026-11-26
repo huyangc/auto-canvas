@@ -38,27 +38,13 @@ function tabActions() {
     busy: false,
     onNew: vi.fn(),
     onOpenFile: vi.fn(),
+    onOpenCloudProjects: vi.fn(),
     onClose: vi.fn(),
-    shelf: {
-      projects: [
-        {
-          id: "amp",
-          name: "Amp",
-          updatedAt: "2026-11-21T00:00:00.000Z",
-          revision: 1,
-          schemaVersion: 1,
-        },
-      ],
-      onOpened: vi.fn(),
-      onOpen: vi.fn(),
-      onRename: vi.fn(async () => {}),
-      onDelete: vi.fn(async () => {}),
-    },
   };
 }
 
-/** The tab actions a host without Cloud gives: no Shelf to pick from. */
-function tabActionsWithoutShelf(): FileProjectTabActions {
+/** The tab actions a host without Cloud gives: no Cloud Projects dialog trigger. */
+function tabActionsWithoutCloud(): FileProjectTabActions {
   const { busy, onNew, onOpenFile, onClose } = tabActions();
   return { busy, onNew, onOpenFile, onClose };
 }
@@ -86,14 +72,15 @@ const button = (host: HTMLElement, name: string) =>
   );
 
 describe("FileCommandMenu project tab actions", () => {
-  it("lists the tab strip's actions with the strip's names", () => {
+  it("lists the tab strip's actions including Open Cloud Project…", () => {
     const markup = renderToStaticMarkup(
       <FileCommandMenu {...baseProps()} projectTabs={tabActions()} />,
     );
     expect(markup).toContain(">New project tab<");
     expect(markup).toContain(">Open file in new tab<");
-    expect(markup).toContain('aria-label="Cloud Projects"');
-    expect(markup.indexOf(">Open Cloud Project…")).toBeLessThan(
+    expect(markup).toContain(">Open Cloud Project…<");
+    expect(markup).not.toContain('aria-label="Cloud Projects"');
+    expect(markup.indexOf(">Open Cloud Project…<")).toBeLessThan(
       markup.indexOf(">Close tab<"),
     );
     expect(markup.indexOf(">Close tab<")).toBeLessThan(
@@ -103,12 +90,12 @@ describe("FileCommandMenu project tab actions", () => {
     expect(markup.indexOf(">New Project<")).toBeLessThan(
       markup.indexOf(">New project tab<"),
     );
-    expect(markup.indexOf(">Open Cloud Project…")).toBeLessThan(
+    expect(markup.indexOf(">Open Cloud Project…<")).toBeLessThan(
       markup.indexOf('data-testid="save-cloud-project"'),
     );
   });
 
-  it("offers the Shelf only with Cloud, and nothing without the actions", () => {
+  it("offers Open Cloud Project… only with Cloud, and nothing without the actions", () => {
     const local = renderToStaticMarkup(
       <FileCommandMenu
         {...baseProps()}
@@ -131,8 +118,10 @@ describe("FileCommandMenu project tab actions", () => {
     const host = await mount({ ...baseProps(), projectTabs: actions });
     await act(async () => button(host, "New project tab")!.click());
     await act(async () => button(host, "Open file in new tab")!.click());
+    await act(async () => button(host, "Open Cloud Project…")!.click());
     expect(actions.onNew).toHaveBeenCalledTimes(1);
     expect(actions.onOpenFile).toHaveBeenCalledTimes(1);
+    expect(actions.onOpenCloudProjects).toHaveBeenCalledTimes(1);
     // The menu's own button takes the focus back when the tab is kept.
     await act(async () => button(host, "Close tab")!.click());
     expect(actions.onClose).toHaveBeenCalledWith(host.querySelector("summary"));
@@ -146,29 +135,8 @@ describe("FileCommandMenu project tab actions", () => {
     );
     expect(button(host, "New project tab")!.disabled).toBe(true);
     expect(button(host, "Open file in new tab")!.disabled).toBe(true);
+    expect(button(host, "Open Cloud Project…")!.disabled).toBe(true);
     expect(button(host, "Close tab")!.disabled).toBe(true);
-  });
-
-  it("opens the Shelf submenu, reloads it, and opens a Shelf project", async () => {
-    const actions = tabActions();
-    const host = await mount({ ...baseProps(), projectTabs: actions });
-    const trigger = [...host.querySelectorAll("button")].find((item) =>
-      item.textContent?.startsWith("Open Cloud Project…"),
-    )!;
-    const options = host.querySelector<HTMLElement>(
-      '[role="group"][aria-label="Cloud Projects"]',
-    )!;
-    expect(options.hidden).toBe(true);
-    await act(async () => trigger.click());
-    expect(options.hidden).toBe(false);
-    expect(actions.shelf.onOpened).toHaveBeenCalledTimes(1);
-    // One submenu at a time: Import closes the Shelf.
-    await act(async () => button(host, "Import")!.click());
-    expect(options.hidden).toBe(true);
-    await act(async () => trigger.click());
-    expect(actions.shelf.onOpened).toHaveBeenCalledTimes(2);
-    await act(async () => button(options, "Amp")!.click());
-    expect(actions.shelf.onOpen).toHaveBeenCalledWith("amp");
   });
 
   it("collapses its submenus when the File menu that holds it closes", async () => {
@@ -190,7 +158,6 @@ describe("FileCommandMenu project tab actions", () => {
         details.dispatchEvent(new Event("toggle"));
       });
     for (const [title, label] of [
-      ["Open Cloud Project…", "Cloud Projects"],
       ["Import", "Import"],
       ["Export", "Export"],
     ] as const) {
@@ -204,96 +171,6 @@ describe("FileCommandMenu project tab actions", () => {
       await toggleFile(true);
       expect(options.hidden, title).toBe(true);
     }
-    // So every open of the Shelf reads the list again.
-    await act(async () => button(host, "Open Cloud Project…")!.click());
-    expect(actions.shelf.onOpened).toHaveBeenCalledTimes(2);
-  });
-
-  it("keeps the File menu open for the Shelf's own controls", async () => {
-    const actions = tabActions();
-    // The header's File menu closes on a button click and on Escape.
-    const onMenuClick = vi.fn();
-    const onMenuKey = vi.fn();
-    const host = document.createElement("div");
-    document.body.append(host);
-    root = createRoot(host);
-    await act(async () =>
-      root!.render(
-        <div onClick={onMenuClick} onKeyDown={onMenuKey}>
-          <FileCommandMenu {...baseProps()} projectTabs={actions} embedded />
-        </div>,
-      ),
-    );
-    const options = host.querySelector<HTMLElement>(
-      '[role="group"][aria-label="Cloud Projects"]',
-    )!;
-    // Rename and Delete keep the menu that holds them open.
-    await act(async () => button(options, "Rename Amp")!.click());
-    expect(onMenuClick).not.toHaveBeenCalled();
-    const field = options.querySelector<HTMLInputElement>(
-      'input[aria-label="Shelf project name"]',
-    )!;
-    // Every key in the name field stays with the field, and so does every
-    // key inside the Browse dialog (here a double: jsdom has no showModal).
-    const modal = document.createElement("dialog");
-    const modalButton = document.createElement("button");
-    modal.append(modalButton);
-    options.querySelector(".file-shelf")!.append(modal);
-    for (const target of [field, modalButton])
-      for (const key of [
-        "ArrowLeft",
-        "ArrowRight",
-        "ArrowUp",
-        "ArrowDown",
-        "Home",
-        "End",
-        "Enter",
-        " ",
-        "a",
-        "Escape",
-      ])
-        await act(async () =>
-          target.dispatchEvent(
-            new KeyboardEvent("keydown", { key, bubbles: true }),
-          ),
-        );
-    expect(onMenuKey).not.toHaveBeenCalled();
-  });
-
-  it("stays open under the Shelf's open dialog", async () => {
-    const actions = tabActions();
-    const host = document.createElement("div");
-    document.body.append(host);
-    root = createRoot(host);
-    await act(async () =>
-      root!.render(
-        <ProjectMenu label="File" name="Amp" dirty={false}>
-          <FileCommandMenu {...baseProps()} projectTabs={actions} embedded />
-        </ProjectMenu>,
-      ),
-    );
-    const details = host.querySelector("details")!;
-    const toggleFile = (open: boolean) =>
-      act(async () => {
-        details.open = open;
-        details.dispatchEvent(new Event("toggle"));
-      });
-    await toggleFile(true);
-    await act(async () => button(host, "Open Cloud Project…")!.click());
-    const options = host.querySelector<HTMLElement>(
-      '[role="group"][aria-label="Cloud Projects"]',
-    )!;
-    const modal = document.createElement("dialog");
-    modal.setAttribute("open", "");
-    options.querySelector(".file-shelf")!.append(modal);
-    await toggleFile(false);
-    expect(details.open).toBe(true);
-    expect(options.hidden).toBe(false);
-    // With the dialog gone it closes and collapses as before.
-    modal.remove();
-    await toggleFile(false);
-    expect(details.open).toBe(false);
-    expect(options.hidden).toBe(true);
   });
 });
 
@@ -307,18 +184,18 @@ describe("FileCommandMenu", () => {
     expect(alone.indexOf('class="command-separator"')).toBeGreaterThan(
       alone.indexOf(">New Project<"),
     );
-    // The tab group joins after Project, with or without the Shelf.
+    // The tab group joins after Project, with or without Cloud Projects.
     const tabs = renderToStaticMarkup(
       <FileCommandMenu {...baseProps()} projectTabs={tabActions()} />,
     );
     expect(separators(tabs)).toBe(4);
-    const withoutShelf = renderToStaticMarkup(
+    const withoutCloud = renderToStaticMarkup(
       <FileCommandMenu
         {...baseProps()}
-        projectTabs={tabActionsWithoutShelf()}
+        projectTabs={tabActionsWithoutCloud()}
       />,
     );
-    expect(separators(withoutShelf)).toBe(4);
+    expect(separators(withoutCloud)).toBe(4);
     // Revert and Recover close the menu as their own group, and the group
     // exists only while one of them does.
     const recovery = renderToStaticMarkup(
@@ -353,7 +230,7 @@ describe("FileCommandMenu", () => {
   });
 
   it("leaves the Cloud Projects to the user menu in accounts mode", () => {
-    // The header's account menu lists them as My Cloud Projects; File keeps
+    // The header's account menu opens them via My Cloud Projects; File keeps
     // its other tab commands and Save.
     const markup = renderToStaticMarkup(
       <AccountContext.Provider
@@ -396,7 +273,7 @@ describe("FileCommandMenu", () => {
     );
 
     expect(markup.split(">New Project<")).toHaveLength(2);
-    // Project Info comes first; Cloud Projects are listed elsewhere.
+    // Project Info comes first; Cloud Projects open in their own dialog.
     expect(markup.indexOf(">Project Info<")).toBeGreaterThan(0);
     expect(markup.indexOf(">Project Info<")).toBeLessThan(
       markup.indexOf(">New Project<"),

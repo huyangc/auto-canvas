@@ -948,6 +948,7 @@ function WorkspaceEditor({
       : undefined;
   const [documentSettingsOpen, setDocumentSettingsOpen] = useState(false);
   const [projectInfoOpen, setProjectInfoOpen] = useState(false);
+  const [cloudProjectsOpen, setCloudProjectsOpen] = useState(false);
   const projectNameEditing = useRef(false);
   const {
     sessionUser,
@@ -1172,6 +1173,7 @@ function WorkspaceEditor({
       setImportReviewOpen(false);
       // Project Info belongs to the outgoing Project.
       setProjectInfoOpen(false);
+      setCloudProjectsOpen(false);
       const nextDocument = replaceProject(nextProject);
       if (options.agentEdited) editorDocumentController.noteAgentEdit();
       documentViewBoxes.current = new Map();
@@ -5134,13 +5136,10 @@ function WorkspaceEditor({
         documentSettingsOpen={documentSettingsOpen}
         setDocumentSettingsOpen={setDocumentSettingsOpen}
         setProjectInfoOpen={setProjectInfoOpen}
+        setCloudProjectsOpen={setCloudProjectsOpen}
         projectNameEditing={projectNameEditing}
 
-        cloudProjects={cloudProjects}
-        reloadCloudProjects={reloadCloudProjects}
         cloudManagementBusy={cloudManagementBusy}
-        renameShelfProject={renameShelfProject}
-        deleteShelfProject={deleteShelfProject}
         savedProjectBaseline={savedProjectBaseline}
         isDirtyWork={isDirtyWork}
         hasUnsavedChanges={hasUnsavedChanges}
@@ -5151,7 +5150,6 @@ function WorkspaceEditor({
         revertToSavedProjectBaseline={revertToSavedProjectBaseline}
         openRecoveryDialog={openRecoveryDialog}
         openProjectFile={openProjectFile}
-        openCloudProjectById={openCloudProjectById}
         agentSession={agentSession}
         openAgentConnection={openAgentConnection}
         tool={tool}
@@ -5231,6 +5229,13 @@ function WorkspaceEditor({
         netlistRootDocumentId={netlistRootDocumentId}
         projectInfoOpen={projectInfoOpen}
         setProjectInfoOpen={setProjectInfoOpen}
+        cloudProjectsOpen={cloudProjectsOpen}
+        setCloudProjectsOpen={setCloudProjectsOpen}
+        cloudProjectsBusy={projectTabs.busy || cloudManagementBusy}
+        openCloudProjectById={openCloudProjectById}
+        renameShelfProject={renameShelfProject}
+        deleteShelfProject={deleteShelfProject}
+        reloadCloudProjects={reloadCloudProjects}
 
         cloudProjects={cloudProjects}
 

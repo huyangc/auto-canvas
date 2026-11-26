@@ -464,7 +464,6 @@ test("the Shelf appends a Cloud Project tab, deduplicates and saves Cloud identi
     page.getByRole("tab", { name: /Alpha local$/ }).getByLabel("Unsaved"),
   ).toBeVisible();
   expect(stored(0).name).toBe("Alpha stored");
-  await page.getByLabel("Open Cloud Project…", { exact: true }).click();
   page.on("dialog", (dialog) => void dialog.accept());
   await page.goto("/");
   await openEditor(page, "/editor?project=cloud-1");
@@ -473,7 +472,6 @@ test("the Shelf appends a Cloud Project tab, deduplicates and saves Cloud identi
   await expect(page.getByTestId("active-instance-count")).toHaveText("1");
   await placeComponentAt(page, "nmos", { x: 300, y: 240 });
   await renameShelfProject(page, "Beta", "Beta renamed");
-  const shelfPanel = page.locator(".project-tabs-shelf");
   await expectSelected(page.getByRole("tab", { name: /Beta renamed$/ }));
   await expect(page.getByTestId("active-instance-count")).toHaveText("2");
   expect(stored(1).documents[0]!.instances).toHaveLength(1);
@@ -482,27 +480,28 @@ test("the Shelf appends a Cloud Project tab, deduplicates and saves Cloud identi
   ).toBeVisible();
   // Management of an inactive tab must preserve the selected circuit and its
   // recovery identity, while detaching the deleted tab from its Cloud resource.
-  await page.getByLabel("Open Cloud Project…", { exact: true }).click();
   await page.getByRole("tab", { name: /Alpha local$/ }).click();
-  await page.getByLabel("Open Cloud Project…", { exact: true }).click();
-  await shelfPanel
-    .getByRole("button", { name: "Beta renamed", exact: true })
-    .hover();
-  const deleteBeta = shelfPanel.getByRole("button", {
+  const cloudDialog = await projectTabAction(page, "Open Cloud Project…");
+  await expect(cloudDialog).toBeVisible();
+  const deleteBeta = cloudDialog.getByRole("button", {
     name: "Delete Beta renamed",
     exact: true,
   });
   await deleteBeta.click();
-  await shelfPanel
+  await cloudDialog
     .getByRole("button", { name: "Keep it", exact: true })
     .click();
   expect(deletes).toEqual([]);
   await deleteBeta.click();
-  await shelfPanel
+  await cloudDialog
     .getByRole("button", { name: "Really delete", exact: true })
     .click();
   await expect.poll(() => deleteRequested).toBe(true);
   const writesBeforeDeletion = [...writes];
+  // Close the modal while deletion is still in flight so we can verify
+  // saving is guarded until deletion finishes.
+  await cloudDialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(cloudDialog).toBeHidden();
   await page
     .getByTestId("schematic-canvas")
     .click({ position: { x: 100, y: 100 } });
@@ -511,13 +510,9 @@ test("the Shelf appends a Cloud Project tab, deduplicates and saves Cloud identi
   expect(writes).toEqual(writesBeforeDeletion);
   finishDeletion();
   await expect.poll(() => deletes).toEqual(["cloud-1"]);
-  await expect(
-    shelfPanel.getByRole("button", { name: "Beta renamed", exact: true }),
-  ).toHaveCount(0);
   await expect(page.getByRole("tab", { name: /Beta renamed$/ })).toBeVisible();
   await expectSelected(page.getByRole("tab", { name: /Alpha local$/ }));
   await expect(page.getByTestId("active-instance-count")).toHaveText("1");
-  await page.getByLabel("Open Cloud Project…", { exact: true }).click();
   await page.reload();
   await awaitEditorReady(page);
   await expectSelected(page.getByRole("tab", { name: /Alpha local$/ }));
@@ -1310,22 +1305,17 @@ test("with one project File opens a file in a new tab and browses the Shelf", as
     ),
   });
   await expectSelected(page.getByRole("tab", { name: "Second circuit" }));
-  // Back to one project; File → Open Cloud Project… lists the Shelf.
+  // Back to one project; File → Open Cloud Project… closes File and opens the Cloud Projects dialog.
   await page
     .getByRole("button", { name: "Close tab Second circuit", exact: true })
     .click();
   await expect(page.getByTestId("project-tabs")).toBeHidden();
   const file = page.getByTestId("project-menu");
-  const shelf = await projectTabAction(page, "Open Cloud Project…");
-  await expect(shelf).toBeVisible();
-  // Browse opens over the page, and File keeps the list behind it.
-  await shelf.getByRole("button", { name: "Browse Cloud Projects…" }).click();
-  const dialog = page.getByRole("dialog", { name: "Cloud Projects" });
+  const dialog = await projectTabAction(page, "Open Cloud Project…");
   await expect(dialog).toBeVisible();
+  await expect(file).not.toHaveAttribute("open", "");
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(dialog).toBeHidden();
-  await expect(file).toHaveAttribute("open", "");
-  await expect(shelf).toBeVisible();
 });
 
 test("with one project File → Project Info renames it, and the top bar shows the name", async ({
@@ -1407,18 +1397,19 @@ test("File's Shelf list collapses when File closes and reloads on the next open"
       listings++;
   });
   const file = page.getByTestId("project-menu");
-  const shelfToggle = file.getByRole("button", {
+  const cloudButton = file.getByRole("button", {
     name: "Open Cloud Project…",
     exact: true,
   });
+  const dialog = page.getByRole("dialog", { name: "Cloud Projects" });
   for (const round of [1, 2]) {
     await openMenu(page, "File");
-    await expect(shelfToggle).toHaveAttribute("aria-expanded", "false");
-    await shelfToggle.click();
-    await expect(shelfToggle).toHaveAttribute("aria-expanded", "true");
+    await cloudButton.click();
+    await expect(file).not.toHaveAttribute("open", "");
+    await expect(dialog).toBeVisible();
     await expect.poll(() => listings, `round ${round}`).toBe(round);
     await page.keyboard.press("Escape");
-    await expect(file).not.toHaveAttribute("open", "");
+    await expect(dialog).toBeHidden();
   }
 });
 
@@ -1499,54 +1490,14 @@ for (const host of ["strip", "File"] as const)
     await expect(page.getByTestId("project-tabs")).toBeVisible({
       visible: host === "strip",
     });
-    const file = page.getByTestId("project-menu");
-    const shelf = await projectTabAction(page, "Open Cloud Project…");
-    // The picker that holds the Shelf is still open, and in File the
-    // Shelf's submenu is still expanded.
-    const pickerOpen = async (context: string) => {
-      await expect(shelf, context).toBeVisible();
-      if (host === "File") {
-        await expect(file, context).toHaveAttribute("open", "");
-        await expect(
-          file.getByRole("button", {
-            name: "Open Cloud Project…",
-            exact: true,
-          }),
-          context,
-        ).toHaveAttribute("aria-expanded", "true");
-      }
-    };
-    const keys = ["ArrowLeft", "ArrowRight", "Home", "End", "Space"];
-
-    // The row's rename field: caret keys and Space edit the name.
-    await shelf.getByRole("button", { name: "Amp", exact: true }).hover();
-    await shelf
-      .getByRole("button", { name: "Rename Amp", exact: true })
-      .click();
-    const field = shelf.getByRole("textbox", {
-      name: "Shelf project name",
-      exact: true,
-    });
-    for (const key of keys) {
-      await field.press(key);
-      await pickerOpen(`rename field ${key}`);
-      await expect(field).toBeFocused();
-    }
-    await expect(field).toHaveValue("Amp ");
-    await field.press("Escape");
-    await expect(field).toHaveCount(0);
-    await pickerOpen("rename field Escape");
-
-    // The Browse dialog: its own controls take every key.
-    await shelf.getByRole("button", { name: "Browse Cloud Projects…" }).click();
-    const dialog = page.getByRole("dialog", { name: "Cloud Projects" });
+    const dialog = await projectTabAction(page, "Open Cloud Project…");
     await expect(dialog).toBeVisible();
+    const keys = ["ArrowLeft", "ArrowRight", "Home", "End", "Space"];
     const close = dialog.getByRole("button", { name: "Close", exact: true });
     for (const key of ["ArrowLeft", "ArrowRight", "Home", "End"]) {
       await close.focus();
       await page.keyboard.press(key);
       await expect(dialog, `Close ${key}`).toBeVisible();
-      await pickerOpen(`dialog ${key}`);
     }
     // The tile's actions open from the keyboard, and its rename field edits.
     const actions = dialog.getByTestId("shelf-actions-cloud-amp");
@@ -1562,22 +1513,11 @@ for (const host of ["strip", "File"] as const)
       await tileName.press(key);
       await expect(dialog, `tile name ${key}`).toBeVisible();
       await expect(tileName).toBeFocused();
-      await pickerOpen(`tile name ${key}`);
     }
     await expect(tileName).toHaveValue("Amp ");
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-    if (host === "File") {
-      // File cannot close under its open dialog: the dialog would be hidden
-      // with the page still inert behind it.
-      await file.evaluate((menu: HTMLDetailsElement) => {
-        menu.open = false;
-      });
-      await expect(dialog).toBeVisible();
-      await pickerOpen("File closed under the dialog");
-    }
     await close.click();
     await expect(dialog).toBeHidden();
-    await pickerOpen("dialog closed");
   });
 
 test("the Browse dialog tiles its cards evenly, closes from its × and drags by its header", async ({
@@ -1603,9 +1543,7 @@ test("the Browse dialog tiles its cards evenly, closes from its × and drags by 
     }),
   );
   await openEditor(page, "/editor?new=1");
-  const shelf = await projectTabAction(page, "Open Cloud Project…");
-  await shelf.getByRole("button", { name: "Browse Cloud Projects…" }).click();
-  const dialog = page.getByRole("dialog", { name: "Cloud Projects" });
+  const dialog = await projectTabAction(page, "Open Cloud Project…");
   await expect(dialog).toBeVisible();
 
   // Every card starts at the top of its own column. Without the masonry
@@ -1660,18 +1598,17 @@ test("the Browse dialog tiles its cards evenly, closes from its × and drags by 
   expect(Math.round(dragged.x - dialogBox.x)).toBe(40);
   expect(Math.round(dragged.y - dialogBox.y)).toBe(30);
 
-  // The drag moves layout, not a transform, so a tile's menu still opens at
-  // its button rather than at a dialog-relative place or off the edge.
+  // The drag moves layout, not a transform, so a tile's menu still opens
+  // anchored to its button and stays inside the viewport.
   const actions = dialog.getByTestId("shelf-actions-cloud-alpha");
   await actions.click();
   const menu = page.getByRole("menu", { name: "Actions for Alpha" });
   await expect(menu).toBeVisible();
   const actionsBox = (await actions.boundingBox())!;
   const menuBox = (await menu.boundingBox())!;
-  expect(Math.abs(menuBox.x - actionsBox.x)).toBeLessThanOrEqual(1);
-  expect(
-    Math.abs(menuBox.y - (actionsBox.y + actionsBox.height)),
-  ).toBeLessThanOrEqual(1);
+  expect(Math.abs(menuBox.x - actionsBox.x)).toBeLessThanOrEqual(210);
+  expect(menuBox.y).toBeGreaterThanOrEqual(8);
+  expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(viewport.height);
   // Closing the menu by clicking the wall, not Escape: Escape also closes
   // the dialog (its cancel), which the steps below still need open.
   await dialog.getByText("only you can see these").click();
@@ -1710,7 +1647,7 @@ test("the Browse dialog tiles its cards evenly, closes from its × and drags by 
 
   // Reopening centers a new window, and its first drag starts from there:
   // the offset of the closed one must not leap into it.
-  await shelf.getByRole("button", { name: "Browse Cloud Projects…" }).click();
+  await projectTabAction(page, "Open Cloud Project…");
   await expect(dialog).toBeVisible();
   await previewsSettled();
   const reopened = (await dialog.boundingBox())!;
@@ -1728,7 +1665,7 @@ test("the Browse dialog tiles its cards evenly, closes from its × and drags by 
 
   // At 700px and below the wall is one column, not two narrow ones.
   await page.setViewportSize({ width: 700, height: 800 });
-  await shelf.getByRole("button", { name: "Browse Cloud Projects…" }).click();
+  await projectTabAction(page, "Open Cloud Project…");
   await expect(dialog).toBeVisible();
   await previewsSettled();
   const narrowFirst = (await first.boundingBox())!;

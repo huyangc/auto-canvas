@@ -1,7 +1,5 @@
-/* The Cloud Projects window: header bar with its close button, scrolling
- * body, and the frame a drag moves. These rules live beside the component
- * rather than in the shelf wall's stylesheet because the wall is a lazy
- * chunk: the frame must be styled before, and without, that chunk. */
+/* The Cloud Projects modal window: draggable header bar, scrolling body,
+ * and backdrop. Mounted in the independent dialog layer outside menus. */
 
 .cloud-shelf-dialog {
   box-sizing: border-box;
@@ -15,16 +13,12 @@
   background: var(--icm-surface);
   border: 1px solid var(--icm-border);
   border-radius: var(--icm-radius-lg);
+  box-shadow: 0 20px 48px rgb(0 0 0 / 18%);
 }
 
 .cloud-shelf-dialog::backdrop {
   background: rgb(0 0 0 / 30%);
 }
-
-/* The dialog opens from inside File's popover or the strip's Shelf picker;
- * their button and text rules stop at `.cloud-shelf-dialog` (see
- * styles/editor-chrome.css and project-tabs.css). The close button is the
- * shared DialogCloseButton. */
 
 .cloud-shelf-dialog .cloud-shelf-header {
   display: flex;

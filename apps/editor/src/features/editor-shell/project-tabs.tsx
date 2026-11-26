@@ -7,9 +7,7 @@ import {
   type RefObject,
 } from "react";
 import { ContextMenu } from "../../components/context-menu";
-import type { CloudProjectSummary } from "./cloud-projects";
 import "./project-tabs.css";
-import { ProjectShelf } from "./project-shelf";
 
 const InlineConfirm = lazy(() =>
   import("../../components/inline-confirm").then((module) => ({
@@ -30,11 +28,7 @@ export function ProjectTabs({
   closeActiveTab,
   onNew,
   onOpenFile,
-  cloudProjects,
-  onShelfOpened,
-  onOpenShelf,
-  onRenameShelf,
-  onDeleteShelf,
+  onOpenCloudProjects,
 }: {
   cloudEnabled?: boolean;
   tabs: { id: string; name: string; dirty: boolean }[];
@@ -50,11 +44,7 @@ export function ProjectTabs({
   closeActiveTab?: RefObject<((trigger: HTMLElement | null) => void) | null>;
   onNew(): void;
   onOpenFile(): void;
-  cloudProjects: readonly CloudProjectSummary[];
-  onShelfOpened(): void;
-  onOpenShelf(id: string): void;
-  onRenameShelf(id: string, name: string): Promise<void>;
-  onDeleteShelf(id: string): Promise<void>;
+  onOpenCloudProjects(): void;
 }) {
   const list = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState<{
@@ -322,28 +312,29 @@ export function ProjectTabs({
           ↗
         </button>
         {cloudEnabled ? (
-          <details
-            className="project-tabs-shelf"
-            onToggle={(event) => {
-              if (event.currentTarget.open) onShelfOpened();
-            }}
+          <button
+            type="button"
+            className="project-tabs-cloud-button"
+            title="Open Cloud Project…"
+            aria-label="Open Cloud Project…"
+            aria-haspopup="dialog"
+            disabled={busy}
+            onClick={onOpenCloudProjects}
           >
-            <summary
-              title="Open Cloud Project…"
-              aria-label="Open Cloud Project…"
+            <svg
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
             >
-              ▾
-            </summary>
-            <div>
-              <ProjectShelf
-                projects={cloudProjects}
-                busy={busy}
-                onOpen={onOpenShelf}
-                onRename={onRenameShelf}
-                onDelete={onDeleteShelf}
-              />
-            </div>
-          </details>
+              <path d="M4.5 12.25h7.25a2.75 2.75 0 0 0 .5-5.45A4 4 0 0 0 4.6 5.6a3 3 0 0 0-.1 6.65z" />
+            </svg>
+          </button>
         ) : null}
       </div>
       {menu ? (

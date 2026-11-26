@@ -188,10 +188,10 @@ export async function renameProject(page: Page, name: string): Promise<void> {
  * Run one of the tab strip's actions, `New project tab`, `Open file in new
  * tab`, `Open Cloud Project…` or `Close tab` (the active tab's ×): on
  * the strip when it shows (two or more tabs), otherwise from File, which
- * holds them too. The Shelf is the exception in accounts mode: File leaves
- * it to the header's user menu, as My Cloud Projects. For the Shelf it
- * returns the open picker that lists the Cloud Projects; a picker already
- * open stays open.
+ * holds them too. Cloud Projects is the exception in accounts mode: File
+ * leaves it to the header's user menu, as My Cloud Projects. For Cloud
+ * Projects it returns the open Cloud Projects dialog; an already-open dialog
+ * stays open.
  */
 export async function projectTabAction(
   page: Page,
@@ -201,6 +201,9 @@ export async function projectTabAction(
     | "Open Cloud Project…"
     | "Close tab",
 ): Promise<Locator> {
+  const dialog = page.getByRole("dialog", { name: "Cloud Projects" });
+  if (name === "Open Cloud Project…" && (await dialog.isVisible()))
+    return dialog;
   const strip = page.getByTestId("project-tabs");
   if (await strip.isVisible()) {
     if (name === "Close tab")
@@ -208,46 +211,47 @@ export async function projectTabAction(
         .locator('.project-tab[data-active="true"] [data-tab-close]')
         .click();
     else await strip.getByLabel(name, { exact: true }).click();
-    return page.locator(".project-tabs-shelf");
+    return dialog;
   }
   const account = page.getByTestId("header-account-menu");
   if (name === "Open Cloud Project…" && (await account.isVisible())) {
     if ((await account.getAttribute("open")) === null)
       await page.getByTestId("account-name").click();
-    const library = account.getByRole("button", {
-      name: "My Cloud Projects",
-      exact: true,
-    });
-    if ((await library.getAttribute("aria-expanded")) !== "true")
-      await library.click();
-    return account.getByRole("group", { name: "Cloud Projects", exact: true });
+    await account
+      .getByRole("button", {
+        name: "My Cloud Projects",
+        exact: true,
+      })
+      .click();
+    return dialog;
   }
   const file = await openMenu(page, "File");
-  const item = file.getByRole("button", { name, exact: true });
-  if ((await item.getAttribute("aria-expanded")) !== "true") await item.click();
-  return file.getByRole("group", { name: "Cloud Projects", exact: true });
+  await file.getByRole("button", { name, exact: true }).click();
+  return dialog;
 }
 
-/** Rename a Shelf project with the Shelf's own Rename control. */
+/** Rename a Cloud Project in the Cloud Projects dialog. */
 export async function renameShelfProject(
   page: Page,
   from: string,
   to: string,
 ): Promise<void> {
-  const shelf = await projectTabAction(page, "Open Cloud Project…");
-  await shelf.getByRole("button", { name: from, exact: true }).hover();
-  await shelf
+  const dialog = await projectTabAction(page, "Open Cloud Project…");
+  await expect(dialog).toBeVisible();
+  await dialog
     .getByRole("button", { name: `Rename ${from}`, exact: true })
     .click();
-  const field = shelf.getByRole("textbox", {
-    name: "Shelf project name",
+  const field = dialog.getByRole("textbox", {
+    name: "Project name",
     exact: true,
   });
   await field.fill(to);
   await field.press("Enter");
   await expect(
-    shelf.getByRole("button", { name: to, exact: true }),
+    dialog.getByRole("button", { name: to, exact: true }),
   ).toBeVisible();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(dialog).toBeHidden();
 }
 
 /** Run one workflow command from the Netlist menu. */

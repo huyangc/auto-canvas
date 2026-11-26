@@ -332,3 +332,137 @@ it("restores focus to the enabled heart when the PATCH fails", async () => {
   expect(heart()!.disabled).toBe(false);
   expect(document.activeElement).toBe(heart());
 });
+
+it("filters by search, toggles grid/list views, and delegates open/rename/delete", async () => {
+  const alpha = {
+    id: "p-alpha",
+    name: "Alpha Amp",
+    updatedAt: "2026-11-06T00:00:00Z",
+    revision: 2,
+    schemaVersion: 1,
+    favorite: true,
+  };
+  const beta = {
+    id: "p-beta",
+    name: "Beta Filter",
+    updatedAt: "2026-11-05T00:00:00Z",
+    revision: 1,
+    schemaVersion: 1,
+    favorite: false,
+  };
+  let serverProjects = [alpha, beta];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(async () =>
+      Response.json({ projects: serverProjects, limit: 20 }),
+    ),
+  );
+  const onOpenProject = vi.fn();
+  const onRenameProject = vi.fn(async (id: string, name: string) => {
+    serverProjects = serverProjects.map((p) =>
+      p.id === id ? { ...p, name } : p,
+    );
+  });
+  const onDeleteProject = vi.fn(async (id: string) => {
+    serverProjects = serverProjects.filter((p) => p.id !== id);
+  });
+
+  if (typeof window.localStorage?.removeItem === "function")
+    window.localStorage.removeItem("auto-canvas.cloud-projects-view.v1");
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () =>
+    root!.render(
+      createElement(ShelfWall, {
+        onOpenProject,
+        onRenameProject,
+        onDeleteProject,
+      }),
+    ),
+  );
+
+  // Clicking a card invokes onOpenProject without full navigation.
+  const alphaTile = container.querySelector<HTMLButtonElement>(
+    '[data-testid="shelf-tile-p-alpha"]',
+  );
+  expect(alphaTile?.tagName).toBe("BUTTON");
+  await act(async () => alphaTile!.click());
+  expect(onOpenProject).toHaveBeenCalledWith("p-alpha");
+
+  // Search filters projects live.
+  const search = container.querySelector<HTMLInputElement>(
+    'input[aria-label="Search cloud projects"]',
+  )!;
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )!.set!;
+    setter.call(search, "Beta");
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  expect(
+    container.querySelector('[data-testid="shelf-tile-p-alpha"]'),
+  ).toBeNull();
+  expect(
+    container.querySelector('[data-testid="shelf-tile-p-beta"]'),
+  ).not.toBeNull();
+
+  // Clear search and switch to List view.
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>('button[aria-label="Clear search"]')!
+      .click(),
+  );
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>('button[aria-label="List view"]')!
+      .click(),
+  );
+  expect(container.querySelector('[data-testid="shelf-list"]')).not.toBeNull();
+
+  // Inline rename via always-visible Rename button delegates to onRenameProject.
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>(
+        'button[aria-label="Rename Alpha Amp"]',
+      )!
+      .click(),
+  );
+  const renameInput = container.querySelector<HTMLInputElement>(
+    'input[aria-label="Project name"]',
+  )!;
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )!.set!;
+    setter.call(renameInput, "Alpha Renamed");
+    renameInput.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () =>
+    container.querySelector<HTMLButtonElement>(".shelf-rename-save")!.click(),
+  );
+  expect(onRenameProject).toHaveBeenCalledWith("p-alpha", "Alpha Renamed");
+
+  // Always-visible Delete button asks twice and delegates to onDeleteProject.
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>(
+        '[data-testid="shelf-quick-delete-p-beta"]',
+      )!
+      .click(),
+  );
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>(
+        '[aria-label="Delete Beta Filter"] .inline-confirm-danger',
+      )!
+      .click(),
+  );
+  expect(onDeleteProject).toHaveBeenCalledWith("p-beta");
+  expect(
+    container.querySelector('[data-testid="shelf-tile-p-beta"]'),
+  ).toBeNull();
+});

@@ -94,73 +94,11 @@
   outline: 1px solid var(--icm-accent);
   outline-offset: -1px;
 }
-.project-tabs button:hover:not(:where(.cloud-shelf-dialog *)),
-.project-tabs summary:hover {
+.project-tabs button:hover {
   background: var(--icm-surface-hover);
 }
-.project-tabs-shelf {
-  position: relative;
-}
-.project-tabs-shelf summary {
-  list-style: none;
-}
-.project-tabs-shelf > div {
-  position: absolute;
-  right: 0;
-  z-index: 40;
-  width: 230px;
-  max-height: 280px;
-  overflow: auto;
-  padding: 6px;
-  background: var(--icm-surface);
-  border: 1px solid var(--icm-border);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 15%);
-}
-.project-tabs-shelf > div button:not(:where(.cloud-shelf-dialog *)) {
-  display: block;
-  width: 100%;
-  text-align: left;
-  height: auto;
-  padding: 8px;
-}
-.project-tabs-shelf span:not(:where(.cloud-shelf-dialog *)) {
-  font-size: 12px;
-  color: var(--icm-text-muted);
-}
-.project-shelf-row {
-  display: flex;
+.project-tabs-cloud-button {
+  display: inline-flex;
   align-items: center;
-}
-.project-tabs-shelf .project-shelf-open {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.project-shelf-actions {
-  display: flex;
-  visibility: hidden;
-}
-.project-shelf-row:hover .project-shelf-actions,
-.project-shelf-row:focus-within .project-shelf-actions {
-  visibility: visible;
-}
-.project-tabs-shelf .project-shelf-actions button {
-  width: auto;
-  padding: 4px;
-}
-.project-shelf-rename {
-  display: flex;
-  flex-wrap: wrap;
-  min-width: 0;
-  gap: 4px;
-}
-.project-shelf-rename input {
-  width: 100%;
-  box-sizing: border-box;
-}
-.project-tabs-shelf .project-shelf-rename button {
-  width: auto;
-  padding: 4px 8px;
+  justify-content: center;
 }

@@ -32,6 +32,12 @@ export const LazyProjectInfoDialog = lazyChunk("dialog", () =>
   })),
 );
 
+export const LazyCloudProjectsDialog = lazyChunk("dialog", () =>
+  import("../features/editor-shell/cloud-projects-dialog").then((module) => ({
+    default: module.CloudProjectsDialog,
+  })),
+);
+
 export const LazyReplaceGuardDialog = lazyChunk("dialog", () =>
   import("../components/replace-guard-dialog").then((module) => ({
     default: module.ReplaceGuardDialog,
