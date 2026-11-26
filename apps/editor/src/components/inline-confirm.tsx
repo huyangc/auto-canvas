@@ -3,8 +3,10 @@ import { useEffect, useRef, useState, type ButtonHTMLAttributes } from "react";
 /** A local second step, not a modal: keep the decision beside its trigger. */
 export function InlineConfirm({
   children,
-  confirmLabel = "Really delete",
-  cancelLabel = "Keep it",
+  confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
+  promptLabel,
+  dismissOnOutsideClick = false,
   onConfirm,
   open: controlledOpen,
   onOpenChange,
@@ -12,6 +14,8 @@ export function InlineConfirm({
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   confirmLabel?: string;
   cancelLabel?: string;
+  promptLabel?: string;
+  dismissOnOutsideClick?: boolean;
   onConfirm(): void | Promise<unknown>;
   open?: boolean;
   onOpenChange?(open: boolean): void;
@@ -23,10 +27,12 @@ export function InlineConfirm({
   const root = useRef<HTMLSpanElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
   const running = useRef(false);
+  const onOpenChangeRef = useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
   const open = controlledOpen ?? localOpen;
   const change = (next: boolean) => {
     setLocalOpen(next);
-    onOpenChange?.(next);
+    onOpenChangeRef.current?.(next);
     setError(null);
   };
   useEffect(() => {
@@ -41,6 +47,18 @@ export function InlineConfirm({
     details?.addEventListener("toggle", closed);
     return () => details?.removeEventListener("toggle", closed);
   }, [open]);
+  useEffect(() => {
+    if (!open || !dismissOnOutsideClick) return;
+    const handleOutside = (event: PointerEvent) => {
+      if (
+        !running.current &&
+        !root.current?.contains(event.target as Node | null)
+      )
+        change(false);
+    };
+    window.addEventListener("pointerdown", handleOutside, true);
+    return () => window.removeEventListener("pointerdown", handleOutside, true);
+  }, [open, dismissOnOutsideClick]);
   const dismiss = () => {
     if (running.current) return;
     change(false);
@@ -102,23 +120,28 @@ export function InlineConfirm({
           role="group"
           aria-label={triggerProps["aria-label"] ?? confirmLabel}
         >
-          <span className="inline-confirm-actions">
-            <button
-              type="button"
-              className="inline-confirm-danger"
-              disabled={pending || triggerProps.disabled}
-              onClick={() => void confirm()}
-            >
-              {pending ? "Working…" : confirmLabel}
-            </button>
-            <button
-              type="button"
-              ref={cancel}
-              disabled={pending}
-              onClick={dismiss}
-            >
-              {cancelLabel}
-            </button>
+          <span className="inline-confirm-row">
+            {promptLabel ? (
+              <span className="inline-confirm-prompt">{promptLabel}</span>
+            ) : null}
+            <span className="inline-confirm-actions">
+              <button
+                type="button"
+                className="inline-confirm-danger"
+                disabled={pending || triggerProps.disabled}
+                onClick={() => void confirm()}
+              >
+                {pending ? "Working…" : confirmLabel}
+              </button>
+              <button
+                type="button"
+                ref={cancel}
+                disabled={pending}
+                onClick={dismiss}
+              >
+                {cancelLabel}
+              </button>
+            </span>
           </span>
           {error ? (
             <span className="inline-confirm-error" role="alert">
