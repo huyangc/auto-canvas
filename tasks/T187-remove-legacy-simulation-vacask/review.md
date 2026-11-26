@@ -1,13 +1,15 @@
 # T187 review
 
-- Verdict: approved (round 2)
+- Verdict: approved (round 3)
 - Reviewer: coordinator (Antigravity)
 - Reviewed commit base: `origin/main` (`51990353`)
 
-## Round 1 findings (resolved in round 2)
+## Review rounds resolved
 
-1. Expanded scope to migrate 4 downstream test files (`apps/editor/src/features/netlist-export/netlist-code-edit.test.ts`, `apps/editor/src/features/netlist-export/netlist-process.test.ts`, `packages/edit-engine/src/bus-netlist.test.ts`, `packages/edit-engine/src/external-model-source.test.ts`) from deleted simulation-execution APIs (`generateCircuitSource`, `compileNgspiceSourceSimulation`, `compileSourceSimulation`) to retained design-export and model-source APIs, preserving all active export, bus-hierarchy, and model-source assertions.
-2. Confirmed keeping the 4 optional ngspice electrical checks on surviving built-in block models (`block-supplies.test.ts`, `ideal-logic-gate-models.test.ts`, `ideal-signal-block-models.test.ts`).
+- **Round 2**: Migrated 4 downstream test files (`netlist-code-edit.test.ts`, `netlist-process.test.ts`, `bus-netlist.test.ts`, `external-model-source.test.ts`) to retained export/model-source APIs and confirmed keeping the 4 optional ngspice electrical checks on surviving built-in block models.
+- **Round 3 (PR #160 Codex P2 fixes)**:
+  1. Restored the simulator-independent SG13G2 `createDesignNetlistExport` diagnostic test (previously `sg13g2-simulation.test.ts:10-75`) into `packages/netlist/src/reviewed-high-voltage.test.ts`.
+  2. Strengthened `packages/edit-engine/src/bus-netlist.test.ts` (`expectCallWiring`, `expectBusPassWiring`) to assert exact ordered source-to-pin, child-resistor, and load-resistor connectivity across SPICE and Spectre exports for identity, reverse, migrated, copied, and sliced bus hierarchies.
 
 ## Checks run by reviewer
 
@@ -19,8 +21,8 @@
 - `pnpm lint` — exit 0 (0 errors)
 - `pnpm deadcode` — exit 0 (both `knip` and `knip --production` passed)
 - `pnpm build` — exit 0
-- `pnpm test:local` — 835/839 passed (1 skipped file; skipped tests across the entire repo dropped from 115 to 6); the 3 `apps/server` Postgres test files that hit 5000ms timeouts under parallel CPU load (`app.test.ts`, `component-catalog.test.ts`, `component-library.test.ts`) all passed on serial re-run.
+- `pnpm test:local packages/netlist/src/reviewed-high-voltage.test.ts packages/edit-engine/src/bus-netlist.test.ts` — exit 0 (all tests passed; full 839-file suite verified in round 2)
 
 ## Findings
 
-None. All 143 file changes (+282/-15,984 lines) stay inside approved scope and preserve SPICE/Spectre/RNL export, model-source authoring, `project.simulationFolders` round-tripping, schema 48 → 49 migration, and all compatibility corpus witnesses.
+None.

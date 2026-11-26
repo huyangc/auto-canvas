@@ -17,9 +17,8 @@ import {
   traceHierarchyNet,
 } from "@icm/derived";
 import {
-  analyzeDesignNetlist,
+  type DesignNetlistCell,
   createDesignNetlistExport,
-  printSpiceNetlist,
 } from "@icm/netlist";
 import { parseProject, serializeProject } from "@icm/project-protocol";
 import {
@@ -131,6 +130,77 @@ const resistor = (id: string, value: string) => ({
     parameters: { value },
   },
 });
+
+function expectCallWiring(
+  top: DesignNetlistCell,
+  target: string,
+  variant: string,
+  inputPins: string[],
+  sourceOrder: number[],
+  ids?: Record<string, string>,
+) {
+  const instance = (id: string) =>
+    top.instances.find((item) => item.id === (ids ? ids[id] : id))!;
+  const netAt = (id: string, pin: string) =>
+    instance(id).nodes.find((node) => node.pinName === pin)!.netName;
+  const outputs = inputPins.map((_, index) =>
+    netAt(`RL_${variant}_${index}`, "1"),
+  );
+  const call = instance(variant);
+  expect(call.target).toBe(target);
+  expect(call.nodes.map((node) => node.pinName)).toEqual([
+    ...inputPins,
+    ...outputs.map((_, index) => `OUT<${outputs.length - 1 - index}>`),
+  ]);
+  expect(call.nodes.map((node) => node.netName)).toEqual([
+    ...sourceOrder.map((index) => netAt(`V${index}`, "+")),
+    ...outputs,
+  ]);
+  expect(new Set(call.nodes.map((node) => node.netName)).size).toBe(
+    2 * inputPins.length,
+  );
+  return outputs;
+}
+
+function expectBusPassWiring(
+  child: DesignNetlistCell,
+  top: DesignNetlistCell,
+  migrated: boolean,
+  ids?: Record<string, string>,
+) {
+  const inputs = migrated
+    ? ["INPUT<0>", "INPUT<1>", "INPUT<2>", "INPUT<3>"]
+    : ["IN<3>", "IN<2>", "IN<1>", "IN<0>"];
+  const forward = [0, 1, 2, 3];
+  const backward = [3, 2, 1, 0];
+  for (const i of forward) {
+    const resistor = child.instances.find(
+      (instance) => instance.reference === `R${i}`,
+    )!;
+    expect(resistor.nodes.map((node) => node.netName)).toEqual([
+      child.ports[migrated ? 3 - i : i]!.netName,
+      child.ports[4 + i]!.netName,
+    ]);
+  }
+  return [
+    ...expectCallWiring(
+      top,
+      child.name,
+      "identity",
+      inputs,
+      migrated ? backward : forward,
+      ids,
+    ),
+    ...expectCallWiring(
+      top,
+      child.name,
+      "reverse",
+      inputs,
+      migrated ? forward : backward,
+      ids,
+    ),
+  ];
+}
 
 function busDcFixture(migrate = false) {
   let project = createEmptyProject("bus-dc", "Bus DC oracle", "child");
@@ -292,45 +362,29 @@ function busDcFixture(migrate = false) {
     });
     expect(exported.status, JSON.stringify(exported.diagnostics)).toBe("ready");
     if (exported.status !== "ready") throw new Error("Export refused");
-    expect(
-      exported.ir!.cells.find((c) => c.id === child.id)!.ports,
-    ).toHaveLength(8);
+    const childIR = exported.ir!.cells.find((cell) => cell.id === child.id)!;
+    expect(childIR.ports).toHaveLength(8);
+    if (format === "spice") {
+      expect(childIR.ports.map((p) => p.name)).toEqual([
+        ...(migrate
+          ? ["INPUT_0_", "INPUT_1_", "INPUT_2_", "INPUT_3_"]
+          : ["IN_3_", "IN_2_", "IN_1_", "IN_0_"]),
+        "OUT_3_",
+        "OUT_2_",
+        "OUT_1_",
+        "OUT_0_",
+      ]);
+      expect(exported.file.text).toContain(".subckt bus_pass");
+    }
+    const topIR = exported.ir!.cells.find((cell) => cell.id === top.id)!;
+    const outputs = expectBusPassWiring(childIR, topIR, migrate);
+    expect(new Set(outputs).size).toBe(8);
   }
-  const analysis = analyzeDesignNetlist(project);
-  expect(analysis.ir, JSON.stringify(analysis.diagnostics)).not.toBeNull();
-  const childIR = analysis.ir!.cells.find((c) => c.id === child.id)!;
-  expect(childIR.ports.map((p) => p.name)).toEqual([
-    ...(migrate
-      ? ["INPUT_0_", "INPUT_1_", "INPUT_2_", "INPUT_3_"]
-      : ["IN_3_", "IN_2_", "IN_1_", "IN_0_"]),
-    "OUT_3_",
-    "OUT_2_",
-    "OUT_1_",
-    "OUT_0_",
-  ]);
-  const topIR = analysis.ir!.cells.find((c) => c.id === top.id)!;
-  const outputs: string[] = [];
-  for (const variant of ["identity", "reverse"]) {
-    const call = topIR.instances.find((instance) => instance.id === variant)!;
-    expect(call.nodes.map((n) => n.pinName)).toEqual([
-      ...(migrate
-        ? ["INPUT<0>", "INPUT<1>", "INPUT<2>", "INPUT<3>"]
-        : ["IN<3>", "IN<2>", "IN<1>", "IN<0>"]),
-      "OUT<3>",
-      "OUT<2>",
-      "OUT<1>",
-      "OUT<0>",
-    ]);
-    expect(new Set(call.nodes.map((n) => n.netName)).size).toBe(8);
-    outputs.push(...call.nodes.slice(4).map((node) => node.netName));
-  }
-  return { project, outputs, spice: printSpiceNetlist(analysis.ir!) };
+  return { project };
 }
 
 it("exports distinct bus members through identity and reverse hierarchy after canonical reopening", () => {
-  const { project, spice, outputs } = busDcFixture();
-  expect(new Set(outputs).size).toBe(8);
-  expect(spice).toContain(".subckt bus_pass");
+  const { project } = busDcFixture();
   expect(
     project.documents
       .find((cell) => cell.id === "child")!
@@ -339,8 +393,7 @@ it("exports distinct bus members through identity and reverse hierarchy after ca
 });
 
 it("preserves physical hierarchy channels after connected reorder, rename and resize", () => {
-  const { project, outputs } = busDcFixture(true);
-  expect(new Set(outputs).size).toBe(8);
+  const { project } = busDcFixture(true);
   expect(
     project.documents.find((cell) => cell.id === "child")!.netlist!
       .terminals[0]!.name,
@@ -464,23 +517,28 @@ function copiedBusDcFixture() {
   project = parseProject(saved);
   expect(serializeProject(project)).toBe(saved);
   for (const format of ["spice", "spectre"] as const) {
-    const exported = createDesignNetlistExport(project, { format });
+    const exported = createDesignNetlistExport(project, {
+      format,
+      includeIr: true,
+    });
     expect(exported.status, JSON.stringify(exported.diagnostics)).toBe("ready");
+    if (exported.status !== "ready") throw new Error("Copy export refused");
+    const topIR = exported.ir!.cells.find((cell) => cell.id === "copied-top")!;
+    const childIR = exported.ir!.cells.find(
+      (cell) => cell.name === "bus_pass",
+    )!;
+    const outputs = expectBusPassWiring(
+      childIR,
+      topIR,
+      true,
+      plan.mapping.objects.instances,
+    );
+    expect(new Set(outputs).size).toBe(8);
   }
-  const analysis = analyzeDesignNetlist(project);
-  expect(analysis.ir, JSON.stringify(analysis.diagnostics)).not.toBeNull();
-  const topIR = analysis.ir!.cells.find((cell) => cell.id === "copied-top")!;
-  const outputs = ["identity", "reverse"].flatMap((variant) => {
-    const id = plan.mapping.objects.instances[variant]!;
-    const call = topIR.instances.find((instance) => instance.id === id)!;
-    expect(new Set(call.nodes.map((node) => node.netName)).size).toBe(8);
-    return call.nodes.slice(4).map((node) => node.netName);
-  });
-  return outputs;
 }
 
 it("copies transformed migrated hierarchy across Projects with independent scalar outputs after reopening", () => {
-  expect(new Set(copiedBusDcFixture()).size).toBe(8);
+  copiedBusDcFixture();
 });
 
 function slicedBusDcFixture() {
@@ -658,23 +716,20 @@ function slicedBusDcFixture() {
         ? ["IN_1_", "IN_0_", "OUT_1_", "OUT_0_"]
         : ["IN\\<1\\>", "IN\\<0\\>", "OUT\\<1\\>", "OUT\\<0\\>"],
     );
+    const topIR = exported.ir!.cells.find((cell) => cell.id === "top")!;
+    const inputs = ["IN<1>", "IN<0>"];
+    const outputs = [
+      ...expectCallWiring(topIR, "slice_pass", "nested", inputs, [2, 3]),
+      ...expectCallWiring(topIR, "slice_pass", "reorder", inputs, [1, 0]),
+      ...expectCallWiring(topIR, "slice_pass", "range", inputs, [2, 3]),
+    ];
+    expect(new Set(outputs).size).toBe(6);
   }
-  const topIR = analyzeDesignNetlist(project).ir!.cells.find(
-    (cell) => cell.id === "top",
-  )!;
-  const outputs = variants.flatMap((variant) => {
-    const call = topIR.instances.find(
-      (instance) => instance.id === variant.id,
-    )!;
-    expect(new Set(call.nodes.map((node) => node.netName)).size).toBe(4);
-    return call.nodes.slice(2).map((node) => node.netName);
-  });
-  return { project, outputs };
+  return { project };
 }
 
 it("exports mixed bundles, ordered and nested slices through hierarchy after canonical reopening", () => {
-  const { outputs, project } = slicedBusDcFixture();
-  expect(new Set(outputs).size).toBe(6);
+  const { project } = slicedBusDcFixture();
   expect(
     project.documents.find((document) => document.id === "top")!.netlist!
       .terminals[0]!.name,
