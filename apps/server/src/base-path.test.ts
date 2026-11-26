@@ -52,6 +52,7 @@ it("confines HTTP routes and the static SPA to the configured prefix", async () 
       '<script src="/canvas/app.js"></script>',
     );
     await writeFile(join(root, "app.js"), "console.log('canvas')");
+    await writeFile(join(root, "core.wasm"), new Uint8Array([0, 97, 115, 109]));
     await serveEditor(app, root, "/canvas");
     expect(await (await app.request("/canvas/api/health")).json()).toEqual({
       ok: true,
@@ -77,6 +78,9 @@ it("confines HTTP routes and the static SPA to the configured prefix", async () 
     expect(
       (await app.request("/canvas/app.js")).headers.get("content-type"),
     ).toContain("javascript");
+    expect(
+      (await app.request("/canvas/core.wasm")).headers.get("content-type"),
+    ).toBe("application/wasm");
     expect((await app.request("/canvas/api/auth/providers")).status).toBe(200);
     expect((await app.request("/canvas/api/components/bad!id")).status).toBe(
       400,
