@@ -7,6 +7,7 @@ import {
   differentialPortSeats,
 } from "./differential-branches.js";
 import { feedbackRowCircuit, hasTransistor } from "./feedback-rows.js";
+import { mctsDraftEligible } from "./mcts-placement.js";
 import { conventionDraftEligible } from "./convention-relations.js";
 import { netlistMirrorSeats } from "./netlist-mirror-seats.js";
 import { netlistSymmetry } from "./readability-netlist-symmetry.js";
@@ -142,6 +143,7 @@ import {
 } from "./layout-choices.js";
 import {
   improvesWireLayout,
+  compareCompleteness,
   compareRuns,
   copyRefinedResult,
   refinementMetrics,
@@ -1730,14 +1732,44 @@ function planAutoLayoutMeasured(
     withDraft && withDraft.slice(0, refinedCount).includes(solved)
       ? select(withDraft)
       : undefined;
+  const incumbent =
+    withSolved?.selected.strategy === "convention" &&
+    compareRuns(withSolved.selected.run, chosen.selected.run, resolver) < 0
+      ? withSolved
+      : chosen;
+  const withMcts = (() => {
+    try {
+      if (!mctsDraftEligible(document, resolver, options)) return undefined;
+      const candidate = runs.get(route("mcts", emptyOverrides()).result)!;
+      if (
+        !Number.isFinite(routedScore(candidate.run, resolver)) ||
+        [...originals, ...aligned, ...(solved ? [solved] : [])].some(
+          (other) => edits(other) === edits(candidate),
+        )
+      )
+        return undefined;
+      const rankedMcts = rank([...incumbent.portfolio, candidate]);
+      if (!rankedMcts.slice(0, refinedCount).includes(candidate))
+        return undefined;
+      const trial = select(rankedMcts);
+      return trial.selected.strategy === "mcts" &&
+        compareCompleteness(
+          trial.selected.run,
+          incumbent.selected.run,
+          resolver,
+        ) <= 0 &&
+        compareRuns(trial.selected.run, incumbent.selected.run, resolver) < 0
+        ? trial
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
   const {
     portfolio,
     selected,
     refined: refinedFinalists,
-  } = withSolved?.selected.strategy === "convention" &&
-  compareRuns(withSolved.selected.run, chosen.selected.run, resolver) < 0
-    ? withSolved
-    : chosen;
+  } = withMcts ?? incumbent;
   // Snapshot the other refined run before facing/rerouting mutates results.
   // The existing winner (including its annealed fallback) is finished first.
   const runner = refinedFinalists
@@ -2119,7 +2151,8 @@ function planAutoLayoutMeasured(
                 (run) =>
                   (chosen.portfolio !== ranked ||
                     !isStackStrategy(run.strategy)) &&
-                  (portfolio !== chosen.portfolio ||
+                  (!!withMcts || run.strategy !== "mcts") &&
+                  (incumbent.portfolio !== chosen.portfolio ||
                     run.strategy !== "convention"),
               ),
               symmetryDraft || fixed.size || document.instances.length > 40

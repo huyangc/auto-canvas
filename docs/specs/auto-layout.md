@@ -690,8 +690,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
 - **R63 — Distinct, repairable portfolio.** Compare valid initial edit lists
   exactly, keeping the first equal list in `template`, `layered`, `stages`
   (then R163's `feedback-rows` for its subset) order before ranking by the
-  existing routed score; R166 adds stack-aligned candidates and R168 a
-  convention-solved draft. A refused run returns no
+  existing routed score. R166 adds stack-aligned candidates, R168 adds
+  `convention`, and R171 then offers `mcts`. A refused run returns no
   edits, so refused runs are never treated as duplicates. Refine at most two distinct strategies
   through 40 instances, reusing their initial routes. If fewer than two valid
   distinct candidates exist, a refused candidate may fill the second slot; if
@@ -1336,6 +1336,37 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   places loads and output ports below the pair. The centered tee has an upward
   stem to the tail's lower contact. The n-channel step keeps the tail below
   the pair. Both use the same completeness, routing and readability guards.
+
+- **R171 — Role-oriented MCTS draft (T173).** For 2–20 devices in at most
+  40 instances, a transistor circuit with at least two DC branches or a lateral
+  role can offer an additional draft. Partitioned drawings, fixed instances,
+  locked groups or constraints and hierarchical devices are ineligible.
+  Conducting terminals form vertical columns ordered from supply to ground.
+  Parallel degeneration and internally controlled pass transistors
+  (`bridgeTransistors`) and two-pin loads across columns (`bridgePassives`)
+  get horizontal slots. A differential amplifier sensing two columns and
+  driving their gates (`clampAmplifiers`) points toward the driven half from
+  the midpoint. Column coordinates follow the posed conducting-pin axis.
+  Shorter columns align shared-gate partners of the same polarity where row
+  order permits. Parallel bridges stack at 60-unit intervals around the
+  endpoint midpoint, with at least 120 units between branch rows for a pair.
+  With seed 1, single-player UCT explores 320 completions of column order,
+  gate facing and lateral poses. Above six columns it considers the first
+  four heuristic choices per position. Rollouts explore uniformly with
+  probability 0.25. UCT blends best and mean normalized rewards in a 60:40
+  ratio with exploration coefficient 0.7. Reward is `1 / (1 + cost / base)`,
+  with the first valid cost (at least 1) as the base.
+  The proxy counts estimated crossings × 240, MST wire length × 1,
+  potential inversions × 300, misdirected gates × 90, reversed input/output
+  pairs × 250, aspect ratio above 1.8 × 180 and misplaced bridges or clamps
+  × 120. Gates on an external port or input net prefer to face outward at
+  the two outer columns. Other gates face the other pins on their net.
+  A bounded local polish tries adjacent swaps, facing changes and
+  alternate slots. Drafts must pass geometry validation and preserve recognized
+  stage symmetry (paired position, reflected facing and axis devices). R63 replaces the
+  incumbent portfolio only when the distinct MCTS draft wins refinement,
+  strictly improves the incumbent run and preserves or improves physical
+  completeness. A losing draft stays out of annealing and rerouting.
 
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.

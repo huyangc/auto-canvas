@@ -60,10 +60,11 @@ import {
   placeStages,
 } from "./stages.js";
 import { templatePlacement } from "./template-placement.js";
-import { resolvedSymmetry } from "./symmetry.js";
+import { resolvedSymmetry, symmetryCounts } from "./symmetry.js";
 import { isMos } from "./net-roles.js";
 import { placeMarkers } from "./place-markers.js";
 import { alignStacks, draftStrategy, isStackStrategy } from "./stack-snap.js";
+import { solveMctsDraft } from "./mcts-placement.js";
 import { solveConventionDraft } from "./convention-solver.js";
 import type {
   AutoLayoutOptions,
@@ -468,6 +469,52 @@ export function placeDocument(
       };
     targets = structuredClone(draft.placements);
     // R168 chose every pose; R21 leaves them alone.
+    oriented = new Set(targets.keys());
+  } else if (strategy === "mcts") {
+    // R171: offered only for its recognized subset (see auto-layout.ts), and
+    // solved once per planning call. A draft that cannot be built is
+    // refused (R63); the other strategies still plan the Document.
+    const draft = planningMemo<{
+      placements?: Map<string, Placement>;
+      problem?: string;
+    }>(document, resolver, "mcts-draft", () => {
+      try {
+        return solveMctsDraft(document, resolver);
+      } catch {
+        return { problem: "R171: draft failed" };
+      }
+    });
+    if (!draft.placements)
+      return {
+        placements: targets,
+        problem: draft.problem ?? "R171: draft failed",
+      };
+    if (devices.some((i) => !draft.placements!.has(i.id)))
+      return {
+        placements: targets,
+        problem: "R171: draft left a device unplaced",
+      };
+    targets = structuredClone(draft.placements);
+    // The independent column and facing decisions can split an R89/R145
+    // symmetry component. Only offer drafts that realize its paired geometry.
+    if (symmetry.length) {
+      const counts = symmetryCounts(
+        withPlacements(document, targets),
+        resolver,
+        symmetry,
+      );
+      if (
+        counts.mirrored !== counts.pairs ||
+        counts.level !== counts.pairs ||
+        counts.orientationMirrored !== counts.pairs ||
+        counts.onAxis !== counts.axisDevices
+      )
+        return {
+          placements: targets,
+          problem: "R171: draft breaks recognized symmetry",
+        };
+    }
+    // R171 chose every pose; R21 leaves them alone.
     oriented = new Set(targets.keys());
   } else if (draftStrategy(strategy) === "stages") {
     ({ placements: targets, sideRow } = placeStages(
