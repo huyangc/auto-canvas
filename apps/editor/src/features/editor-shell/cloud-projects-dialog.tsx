@@ -86,7 +86,7 @@ export function CloudProjectsDialog({
       onCancel={(event) => {
         if (event.target !== event.currentTarget) return;
         event.preventDefault();
-        onClose();
+        closeDialog();
       }}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) closeDialog();
