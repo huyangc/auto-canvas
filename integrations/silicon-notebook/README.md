@@ -149,8 +149,21 @@ The UI package [`ui/auto-canvas/`](ui/auto-canvas) adds one button,
 **打开电路画布**, to silicon-notebook's workspace side panel: a signed-in user
 who opens a notebook sees it in the Sources panel's tool row (beside
 补全论文信息), and its click takes them to `/canvas`, where the canvas editor
-opens as that same user. Nothing of the notebook or its sources is passed to
-the canvas. silicon-notebook shows the button only to users who may read the
+opens as that same user.
+
+Canvas also supports **group-shared circuit projects and component libraries**
+backed by silicon-notebook's groups (`GET /api/notebook/groups` and
+`/api/notebook/groups/:groupId/{projects|components}`):
+
+- Deep-linking to `/canvas/?group=<groupId>&view=projects` or
+  `/canvas/?group=<groupId>&view=components` opens the Cloud Projects or User
+  Components dialog directly on that group, and the Canvas top-right user menu
+  offers a direct link back to that group (`/#groups&group=<groupId>`).
+- Regular group members submit circuits or components into a `pending` review
+  queue; group admins (`admin`/`owner`) and system admins can publish directly
+  as `approved` and approve or reject member submissions with a review note.
+
+silicon-notebook shows the button only to users who may read the
 notebook, and only while its backend reports the plugin's entry available:
 with the plugin package installed and configured as in steps 6 and 7. The
 two halves are matched by plugin id, version and entry id: build with the UI

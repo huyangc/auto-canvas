@@ -40,6 +40,7 @@ import {
   type EditorServices,
 } from "../services/editor-services";
 import { EditorAppChrome } from "./editor-app-chrome";
+import type { HeaderNotebookUser } from "../accounts/header-account-menu";
 import type { EditorProjectPanelMode } from "./editor-project-dock";
 import type { createEditorTransactionCommands } from "./editor-transaction-commands";
 import type { useProjectCheck } from "./use-project-check";
@@ -134,6 +135,7 @@ export function EditorMenuBar({
   compactLayout,
   autoLayoutRun,
   importNetlistInputRef,
+  notebookUser,
 }: {
   projectStore: EditorServices["projectStore"];
   publicAgentUiEnabled: boolean;
@@ -206,6 +208,7 @@ export function EditorMenuBar({
   compactLayout: boolean;
   autoLayoutRun: AutoLayoutRunView;
   importNetlistInputRef: RefObject<HTMLInputElement | null>;
+  notebookUser?: HeaderNotebookUser;
 }) {
   const { exportDelivery } = useEditorServices();
   async function copyImportLink() {
@@ -295,6 +298,7 @@ export function EditorMenuBar({
             },
           }
         : {})}
+      {...(notebookUser ? { notebookUser } : {})}
       fileCommands={{
         cloudEnabled: projectStore !== null,
         canRevert: savedProjectBaseline !== null && isDirtyWork(),

@@ -20,14 +20,30 @@
  */
 import { CircuitBoard } from "lucide-react";
 
-export function AutoCanvasEntry() {
+export function AutoCanvasEntry({
+  context,
+}: {
+  context?: { notebook?: { id: string; name: string } };
+} = {}) {
+  const openCanvas = () => {
+    const nb = context?.notebook;
+    if (nb?.id) {
+      const qs = new URLSearchParams({
+        notebook: nb.id,
+        ...(nb.name ? { notebookName: nb.name } : {}),
+      });
+      window.location.assign(`/canvas/?${qs.toString()}`);
+      return;
+    }
+    window.location.assign("/canvas");
+  };
   return (
     <button
       type="button"
       className="button secondary workspace-extension-entry"
       aria-label="打开电路画布"
       title="在当前页面打开电路画布"
-      onClick={() => window.location.assign("/canvas")}
+      onClick={openCanvas}
     >
       <CircuitBoard size={15} aria-hidden="true" />
       <span>打开电路画布</span>

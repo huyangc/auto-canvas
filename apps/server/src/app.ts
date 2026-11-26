@@ -7,6 +7,7 @@ import type { Pool } from "pg";
 import { readAuthConfig, type AuthConfig } from "./auth-config.js";
 import { registerComponents } from "./components.js";
 import type { SessionUser } from "./identity.js";
+import { registerGroupLibraries } from "./group-libraries.js";
 import { createNotebookIdentity } from "./notebook-identity.js";
 import { registerProjects } from "./projects.js";
 
@@ -79,7 +80,9 @@ export function createApp({
 const isIdentityOrProjectPath = (path: string) =>
   path.startsWith("/api/auth/") ||
   path === "/api/projects" ||
-  path.startsWith("/api/projects/");
+  path.startsWith("/api/projects/") ||
+  path === "/api/notebook" ||
+  path.startsWith("/api/notebook/");
 
 /** The single-user contract: one built-in user, `local`, owns everything. */
 function registerLocal(
@@ -283,4 +286,11 @@ function registerNotebook(
     false,
   );
   registerProjects(app, db, (c) => c.get("sessionUser").id, projectLimit);
+  registerGroupLibraries(app, db, {
+    notebookApi: identityOptions.notebookApi,
+    ...(identityOptions.fetch ? { fetch: identityOptions.fetch } : {}),
+    ...(identityOptions.timeoutMs === undefined
+      ? {}
+      : { timeoutMs: identityOptions.timeoutMs }),
+  });
 }

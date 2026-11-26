@@ -311,9 +311,44 @@ it always does and the service worker replaces old shells. At a session change
 the wait is a best effort: unfinished writes, or a tab that closes or crashes,
 lose what the standard editor would lose, and a copy kept only for the tab
 returns only in that tab. Other users' data stays in the browser profile,
-unshown and unencrypted; signing out does not remove it. Not yet in this
-build: the user's display name or a way back to silicon-notebook in the
-editor's own chrome.
+unshown and unencrypted; signing out does not remove it. In the editor's top
+bar, the notebook build renders the signed-in user's menu with their display
+name, **My Cloud Projects**, **Auto-save to Cloud**, and a link back to
+silicon-notebook (`/` or the originating group hash `/#groups&group=<id>`).
+
+### Notebook group-shared libraries
+
+In notebook mode, `/api/notebook/groups` queries silicon-notebook's group API
+over loopback with the caller's bearer token and exposes per-group shared
+circuit projects (`group_projects`) and shared user components
+(`group_components`, migration `007-group-shared-libraries.sql`):
+
+- `GET /api/notebook/groups` lists the caller's groups (or all groups for a
+  system admin) with approved counts and, for group admins, pending counts.
+- `GET/POST /api/notebook/groups/:groupId/projects` and
+  `GET/POST /api/notebook/groups/:groupId/components` list (`status=approved`,
+  `pending` for group admins, or `mine`) and submit items. Group admins
+  (`my_role: "admin"` or system admins) publish directly as `approved`; regular
+  group members submit as `pending`, invisible in the approved library until a
+  group admin approves them via `POST …/:id/review` (`{decision: "approve" | "reject", note?}`).
+- `GET /api/notebook/groups/:groupId/projects/:id`,
+  `GET /api/notebook/groups/:groupId/projects/:id/preview.svg`, and
+  `GET /api/notebook/groups/:groupId/components/:id` return full content for
+  approved entries to any group member, and for pending/rejected entries only
+  to the author or a group admin.
+- `DELETE /api/notebook/groups/:groupId/{projects|components}/:id` lets group
+  admins remove any entry and authors withdraw their own pending or rejected
+  submissions.
+- Opening `/canvas/?group=<groupId>` (or `&view=components`) pre-selects that
+  group in the Cloud Projects or User Components modal.
+- The same approval workflow is also exposed per Silicon Notebook under
+  `/api/notebook/notebooks/:notebookId/{projects|components}`
+  (`notebook_projects` / `notebook_components`), authorized against
+  silicon-notebook's `GET /api/notebooks/:notebookId` (`owner`,
+  `can_manage_content`, `can_manage_notebook`, or system admin approve
+  directly; readers submit into `pending`). Opening
+  `/canvas/?notebook=<notebookId>&notebookProject=<id>` loads that circuit into
+  a new editor tab.
 
 Deploying the notebook build: an origin that has ever served a single-user
 (standalone) canvas, at its root or at `/canvas/`, must not serve the notebook

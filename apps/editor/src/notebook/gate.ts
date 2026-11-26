@@ -5,7 +5,12 @@
  * effects; entries/notebook.tsx wires the real ones.
  */
 import type { GateScreen } from "./screens";
-import { TOKEN_KEY, type Identification, type TokenRead } from "./session";
+import {
+  TOKEN_KEY,
+  type Identification,
+  type NotebookUser,
+  type TokenRead,
+} from "./session";
 
 interface GateEffects<Modules> {
   /**
@@ -25,7 +30,7 @@ interface GateEffects<Modules> {
   /** Installs the token's scoped fetch as the page's fetch; returns revoke. */
   installFetch: (token: string, onUnauthorized: () => void) => () => void;
   /** Builds the services and renders the editor; returns its unmount. */
-  mountApp: (modules: Modules, token: string) => () => void;
+  mountApp: (modules: Modules, token: string, user: NotebookUser) => () => void;
   /** Runs the mounted editor's own page-hide handlers (it stores its work). */
   flushPage: () => void;
   /** Removes what the editor left outside its root after the unmount. */
@@ -181,7 +186,7 @@ export function startNotebookGate<Modules>(effects: GateEffects<Modules>) {
     const revoke = effects.installFetch(read.token, onUnauthorized);
     let unmount: () => void;
     try {
-      unmount = effects.mountApp(modules, read.token);
+      unmount = effects.mountApp(modules, read.token, identity.user);
     } catch {
       // The fetch is installed but no editor came of it: end its authority
       // at once. A document installs a fetch only once, so there is no retry

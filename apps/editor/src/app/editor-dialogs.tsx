@@ -92,6 +92,11 @@ export function EditorDialogs({
   setCloudProjectsOpen,
   cloudProjectsBusy,
   openCloudProjectById,
+  openGroupProjectCopy,
+  activeNotebookGroupId,
+  activeNotebookId,
+  activeNotebookName,
+  onSelectNotebookGroup,
   renameShelfProject,
   deleteShelfProject,
   reloadCloudProjects,
@@ -191,6 +196,11 @@ export function EditorDialogs({
   setCloudProjectsOpen: Dispatch<SetStateAction<boolean>>;
   cloudProjectsBusy: boolean;
   openCloudProjectById: ProjectFileLifecycle["openCloudProjectById"];
+  openGroupProjectCopy?: (name: string, projectText: string) => void;
+  activeNotebookGroupId?: string | null;
+  activeNotebookId?: string | null;
+  activeNotebookName?: string | null;
+  onSelectNotebookGroup?: (groupId: string) => void;
   renameShelfProject: ProjectTabSessions["renameShelfProject"];
   deleteShelfProject: ProjectTabSessions["deleteShelfProject"];
   reloadCloudProjects: CloudProjects["reloadCloudProjects"];
@@ -352,6 +362,16 @@ export function EditorDialogs({
               onDeleteProject: deleteShelfProject,
               onProjectsChanged: reloadCloudProjects,
               onClose: () => setCloudProjectsOpen(false),
+              ...(openGroupProjectCopy
+                ? {
+                    currentProject: project,
+                    initialGroupId: activeNotebookGroupId,
+                    activeNotebookId,
+                    activeNotebookName,
+                    onSelectGroup: onSelectNotebookGroup,
+                    onOpenGroupProject: openGroupProjectCopy,
+                  }
+                : {}),
             }
           : null
       }

@@ -1,5 +1,5 @@
 import { parseSharedComponentEntry } from "@icm/component-library";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ComponentLibrarySummary } from "@icm/agent-adapter";
 import { readSessionUser, type SessionUser } from "../../components/account";
 import { SymbolArtwork } from "../component-insert/symbol-artwork";
@@ -24,6 +24,14 @@ import { loadComponentCatalog as loadCatalog } from "./component-catalog-loading
 import { ComponentCatalogControls } from "./component-catalog-controls";
 import type { ComponentCatalogQuery } from "@icm/component-library";
 
+const GroupComponentsPanel = import.meta.env.ICM_NOTEBOOK
+  ? lazy(() =>
+      import("../../notebook/group-components-panel").then((module) => ({
+        default: module.GroupComponentsPanel,
+      })),
+    )
+  : null;
+
 const capabilityLabel = (entry: ComponentLibrarySummary) =>
   entry.capability === "symbol-only"
     ? "Symbol only"
@@ -42,6 +50,10 @@ export default function UserComponentsLibrary({
   onDeleteDrafts,
   previewDraftDeletion,
   onOpenDraft,
+  initialGroupId,
+  activeNotebookId,
+  activeNotebookName,
+  onSelectGroup,
 }: {
   open: boolean;
   onClose(): void;
@@ -56,6 +68,10 @@ export default function UserComponentsLibrary({
   onOpenDraft?(target: ComponentDraftTarget): void;
   onDeleteDrafts?(targets: ComponentDraftTarget[]): string | null;
   previewDraftDeletion?(targets: ComponentDraftTarget[]): number;
+  initialGroupId?: string | null | undefined;
+  activeNotebookId?: string | null | undefined;
+  activeNotebookName?: string | null | undefined;
+  onSelectGroup?: ((groupId: string) => void) | undefined;
 }) {
   const [user, setUser] = useState<SessionUser | null>(null);
   const accountIdentity = useRef<string | null>(null);
@@ -63,10 +79,15 @@ export default function UserComponentsLibrary({
   const [authReady, setAuthReady] = useState(false);
   const [queries, setQueries] = useState({ library: "", shelf: "" });
   const [view, setView] = useState<
-    "library" | "published" | "drafts" | "deleted"
-  >("library");
+    "library" | "notebook" | "groups" | "published" | "drafts" | "deleted"
+  >(() => {
+    if (!GroupComponentsPanel) return "library";
+    if (activeNotebookId) return "notebook";
+    if (initialGroupId) return "groups";
+    return "library";
+  });
   const deleted = view === "deleted";
-  const shelf = view !== "library";
+  const shelf = view === "published" || view === "drafts" || view === "deleted";
   const [page, setPage] = useState<ComponentLibrarySummaryPage>({
     entries: [],
     nextCursor: null,
@@ -244,7 +265,14 @@ export default function UserComponentsLibrary({
     };
   }, [open, refresh]);
   useEffect(() => {
-    if (!open || !authReady || view === "drafts") return;
+    if (
+      !open ||
+      !authReady ||
+      view === "drafts" ||
+      view === "groups" ||
+      view === "notebook"
+    )
+      return;
     const controller = new AbortController();
     request.current = controller;
     setError(null);
@@ -409,11 +437,31 @@ export default function UserComponentsLibrary({
             <button
               type="button"
               role="tab"
-              aria-selected={!shelf}
+              aria-selected={view === "library"}
               onClick={() => switchView("library")}
             >
               Library
             </button>
+            {GroupComponentsPanel && activeNotebookId ? (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === "notebook"}
+                onClick={() => switchView("notebook")}
+              >
+                当前笔记本器件库
+              </button>
+            ) : null}
+            {GroupComponentsPanel ? (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === "groups"}
+                onClick={() => switchView("groups")}
+              >
+                群组器件库
+              </button>
+            ) : null}
             <button
               type="button"
               role="tab"
@@ -513,7 +561,33 @@ export default function UserComponentsLibrary({
             ) : null}
           </div>
         ) : null}
-        {view === "drafts" ? (
+        {view === "notebook" && activeNotebookId && GroupComponentsPanel ? (
+          <div style={{ padding: "12px 16px", overflowY: "auto", flex: 1 }}>
+            <Suspense fallback={<p>正在加载笔记本器件库…</p>}>
+              <GroupComponentsPanel
+                notebookId={activeNotebookId}
+                notebookName={activeNotebookName}
+                onInsertComponent={async (entry) => {
+                  onClose();
+                  await onInsert(entry);
+                }}
+              />
+            </Suspense>
+          </div>
+        ) : view === "groups" && GroupComponentsPanel ? (
+          <div style={{ padding: "12px 16px", overflowY: "auto", flex: 1 }}>
+            <Suspense fallback={<p>正在加载群组器件库…</p>}>
+              <GroupComponentsPanel
+                initialGroupId={initialGroupId}
+                onSelectGroup={onSelectGroup}
+                onInsertComponent={async (entry) => {
+                  onClose();
+                  await onInsert(entry);
+                }}
+              />
+            </Suspense>
+          </div>
+        ) : view === "drafts" ? (
           <section
             className="component-shelf-drafts"
             aria-label="Project drafts"
@@ -708,7 +782,10 @@ export default function UserComponentsLibrary({
             </div>
           </>
         )}
-        {(loading || busy) && view !== "drafts" ? (
+        {(loading || busy) &&
+        view !== "drafts" &&
+        view !== "groups" &&
+        view !== "notebook" ? (
           <footer className="user-components-footer">
             <small role="status">
               {busy ? "Reading component…" : "Loading components…"}

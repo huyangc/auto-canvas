@@ -106,7 +106,7 @@ export function mountNotebookEditor(overrides: NotebookEntryOverrides = {}) {
       page.fetch = scoped.fetch;
       return scoped.revoke;
     },
-    mountApp: ({ App, createWebEditorServices }) => {
+    mountApp: ({ App, createWebEditorServices }, _token, user) => {
       const standard = createWebEditorServices();
       const services = {
         ...standard,
@@ -116,7 +116,15 @@ export function mountNotebookEditor(overrides: NotebookEntryOverrides = {}) {
       const root = createRoot(container);
       root.render(
         <EditorErrorBoundary>
-          <App services={services} publicAgentUiEnabled={false} />
+          <App
+            services={services}
+            publicAgentUiEnabled={false}
+            notebookUser={{
+              id: user.id,
+              displayName: user.displayName,
+              isAdmin: user.isAdmin,
+            }}
+          />
         </EditorErrorBoundary>,
       );
       // For the browser cases: the namespace is fixed and the editor's

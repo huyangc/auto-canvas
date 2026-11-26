@@ -54,6 +54,10 @@ export type EditorComponentEditorProps = {
   selectOnly: ReturnType<typeof useSelectionController>["selectOnly"];
   cancelAllTransientInteraction: () => void;
   editorCommands: ReturnType<typeof createEditorCommandRouter>;
+  initialGroupId?: string | null;
+  activeNotebookId?: string | null;
+  activeNotebookName?: string | null;
+  onSelectGroup?: (groupId: string) => void;
 };
 
 const ComponentSession = lazyChunk(

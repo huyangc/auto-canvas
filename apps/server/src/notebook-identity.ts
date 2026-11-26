@@ -92,7 +92,7 @@ const loopbackLookup: LookupFunction = (hostname, options, callback) => {
   });
 };
 
-function directGet(
+export function directNotebookGet(
   url: URL,
   { headers, signal }: { headers: Record<string, string>; signal: AbortSignal },
 ): Promise<Response> {
@@ -139,9 +139,10 @@ function directGet(
   });
 }
 
-async function readCapped(
+export async function readNotebookCapped(
   response: Response,
   signal: AbortSignal,
+  maxBytes = MAX_BODY_BYTES,
 ): Promise<string> {
   if (!response.body) return "";
   const reader = response.body.getReader();
@@ -158,7 +159,7 @@ async function readCapped(
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > MAX_BODY_BYTES) throw new Rejected(503);
+      if (size > maxBytes) throw new Rejected(503);
       chunks.push(value);
     }
   } finally {
@@ -229,7 +230,7 @@ export function createNotebookIdentity({
   const pending = new Map<string, Promise<NotebookIdentityResult>>();
   /** Tokens whose profile write outlived the validation that started it. */
   const lateWrites = new Set<string>();
-  const send = fetch ?? directGet;
+  const send = fetch ?? directNotebookGet;
 
   /** Rejects with 503 after `timeoutMs`, aborting `controller`. */
   function deadline(controller: AbortController): {
@@ -266,7 +267,7 @@ export function createNotebookIdentity({
     }
     let text: string;
     try {
-      text = await readCapped(response, signal);
+      text = await readNotebookCapped(response, signal);
     } catch {
       void response.body?.cancel().catch(() => undefined);
       throw new Rejected(503);

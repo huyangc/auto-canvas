@@ -27,6 +27,10 @@ export default function EditorComponentLibrary(
   props: EditorComponentEditorProps & {
     returnToLibrary: RefObject<boolean>;
     onClose(): void;
+    initialGroupId?: string | null;
+    activeNotebookId?: string | null;
+    activeNotebookName?: string | null;
+    onSelectGroup?: (groupId: string) => void;
   },
 ) {
   const {
@@ -56,6 +60,16 @@ export default function EditorComponentLibrary(
       <UserComponentsLibrary
         open={userComponentsOpen}
         refresh={componentLibraryRefresh}
+        {...(props.initialGroupId !== undefined
+          ? { initialGroupId: props.initialGroupId }
+          : {})}
+        {...(props.activeNotebookId !== undefined
+          ? { activeNotebookId: props.activeNotebookId }
+          : {})}
+        {...(props.activeNotebookName !== undefined
+          ? { activeNotebookName: props.activeNotebookName }
+          : {})}
+        {...(props.onSelectGroup ? { onSelectGroup: props.onSelectGroup } : {})}
         {...(draftCatalog ? { drafts: draftCatalog } : {})}
         previewDraftDeletion={(targets) =>
           planComponentDraftDeletion(
