@@ -156,11 +156,17 @@ controlled-source pseudo-symbol without an approved primitive set.
 ## Pixel fidelity
 
 `fixtures/visual-reference/razavi-reference-v1/fidelity-targets.json`
-is the single hash-pinned registry of Symbol targets. To approve geometry or
-typography changes, verify the pinned evidence and generated catalogs with
-`pnpm symbols:razavi:check` and `pnpm components:check`. Verify the resulting
-formal render and exports against their goldens with `pnpm visual:golden:check`
-and `pnpm export:golden:check`.
+is the single hash-pinned registry of Symbol targets. Before approving any
+geometry or typography change to a registered symbol, complete all three checks.
+
+1. Run `pnpm symbols:razavi:check` and `pnpm components:check` to verify the
+   pinned evidence hashes, measurements and generated catalogs.
+2. For every affected target, visually compare the rendered candidate with its
+   pinned reference raster or PDF crop witness in
+   `fixtures/visual-reference/razavi-reference-v1/`. Cover each registered
+   orientation, sample and variant, even when no golden project uses the symbol.
+3. Run `pnpm visual:golden:check` and `pnpm export:golden:check` to verify
+   formal scene renders and exports against their goldens.
 
 ## Failure behavior
 
