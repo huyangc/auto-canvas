@@ -153,3 +153,11 @@ The package checker emitted an empty failure detail after its archive checks. It
 The sandbox denied loopback binds and PostgreSQL access. The host runs above supplied full P1–P4 acceptance, the site-phase exit 130 and the complete run's duration and disk use. The plan forbids inspecting the owner's ports, so their before/after state was unobserved.
 
 The pinned upstream installer still writes venv diagnostics to the shared path `/tmp/sn_venv_err`. That file can outlive a package installation. Stage P leaves it under the installer's ownership.
+
+## PR review follow-up
+
+A Stage S regression reproduced an exhausted admin session during the
+catalog lookup of a lost CREATE. Confirmed database drops now run before
+that lookup. Stage S passed 102 checks, including this regression and both
+existing lost-poll deadline controls. Format, lint and Markdown links passed.
+The testing guide records the pinned upstream installer's shared venv log.

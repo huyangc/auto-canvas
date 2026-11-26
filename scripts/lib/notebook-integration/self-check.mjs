@@ -129,6 +129,7 @@ async function makeClone(sandbox, name, { files = {}, links = {} }) {
 export async function stageS({ sandbox, report }) {
   await lateContextControl(report);
   await lostPollBoundControl(report, true);
+  await confirmedDropBeforeLookup(report);
   await networkDiagnosticsControl(sandbox, report);
   setupSnippetControl(report);
   removalSnippetControl(report);
@@ -4095,6 +4096,45 @@ async function gateFailureControl(sandbox, report) {
       ) &&
       refusedAtGate(results.silent, /gave no answer within 300 ms/u),
     () => JSON.stringify({ uncaught, arrived, results }),
+  );
+}
+
+/** The catalog read for a settled lost CREATE can use the entire session. */
+async function confirmedDropBeforeLookup(report) {
+  const made = "auto_canvas_it_ctl_confirmed";
+  const lost = "auto_canvas_it_ctl_lost";
+  const issued = [];
+  let expired = false;
+  const recorded = recordingReporter();
+  await dropDatabases({
+    databases: {
+      shutdown: async () => ({
+        created: [made],
+        unknown: [{ name: lost, backendPid: 7 }],
+        unsettled: [],
+      }),
+    },
+    admin: {
+      async query(sql, values) {
+        if (expired) throw new Error("session expired");
+        if (values?.[0]?.includes(lost)) {
+          expired = true;
+          throw new Error("catalog lookup exhausted the session");
+        }
+        issued.push(sql);
+        return { rows: [] };
+      },
+    },
+    report: recorded.report,
+  });
+  report.check(
+    "S a confirmed database receives DROP before a lost-create lookup exhausts the session",
+    expired &&
+      issued.includes(`DROP DATABASE IF EXISTS ${made} WITH (FORCE)`) &&
+      recorded.lines.fail.some((line) =>
+        line.includes("catalog lookup exhausted"),
+      ),
+    () => JSON.stringify({ issued, failures: recorded.lines.fail }),
   );
 }
 
