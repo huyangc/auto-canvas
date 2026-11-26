@@ -46,6 +46,7 @@ export function polarity(symbolId: string): "n" | "p" | undefined {
 
 export function modelIdentity(instance: Instance): string | undefined {
   const binding = instance.netlist?.binding;
+  if (binding?.kind === "subcircuit") return `child:${binding.childDocumentId}`;
   return binding?.kind === "model"
     ? `model:${binding.name}`
     : binding?.kind === "external-subcircuit"
