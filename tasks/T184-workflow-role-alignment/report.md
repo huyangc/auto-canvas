@@ -12,4 +12,4 @@ Reworked the workflow around the task owner, delegated implementer and independe
 
 ## Deviations and open questions
 
-The workflow clarifies how Claude Code callers use the actual planned branch and the reviewed-SHA merge command. The delivery skill itself is unchanged.
+The workflow clarifies how Claude Code callers use the actual planned branch and the reviewed-SHA merge command. The delivery skill itself is unchanged. Its duplicate executable examples still hardcode the task branch and omit the reviewed-SHA guard. Aligning that skill requires separate authorization beyond this task’s owned path.

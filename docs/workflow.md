@@ -48,6 +48,7 @@ tasks/T001-<slug>/
 
   ```bash
   git worktree add ../auto-canvas-T001-example -b task/T001-example origin/main
+  cd ../auto-canvas-T001-example
   pnpm install --frozen-lockfile --offline
   ```
 
