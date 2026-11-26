@@ -252,7 +252,7 @@ type AgentProjectResourcesOptions = Parameters<
 interface ProjectTabSessionsOptions {
   openProjectFile: ProjectFileLifecycle["openProjectFile"];
   projectStore: CloudProjectStore | null;
-  cloudProjects: readonly CloudProjectSummary[];
+  currentCloudProjects(): readonly CloudProjectSummary[];
   onCloudProjectSaved(project: CloudProjectSummary): void;
   onCloudProjectsDeleted(projects: readonly CloudProjectSummary[]): void;
   initialProject: CircuitProject | undefined;
@@ -356,7 +356,7 @@ interface ProjectTabSessionsOptions {
 export function useProjectTabSessions({
   openProjectFile,
   projectStore,
-  cloudProjects,
+  currentCloudProjects,
   onCloudProjectSaved,
   onCloudProjectsDeleted,
   initialProject,
@@ -496,10 +496,8 @@ export function useProjectTabSessions({
       unsavedAtSnapshot: session.dirty,
     });
   }
-  const cloudProjectsRef = useRef(cloudProjects);
-  cloudProjectsRef.current = cloudProjects;
   const cloudProjectNames = () =>
-    cloudProjectsRef.current.map((item) => item.name);
+    currentCloudProjects().map((item) => item.name);
   function createTabSession(
     nextProject = createEmptyProject(
       createId("project"),

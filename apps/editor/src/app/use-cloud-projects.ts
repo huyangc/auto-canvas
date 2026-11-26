@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import type { SessionUser } from "../components/account";
 import type { CloudProjectSummary } from "../features/editor-shell/cloud-projects";
 import type { EditorServices } from "../services/editor-services";
@@ -10,9 +17,19 @@ export function useCloudProjects({
 }: Pick<EditorServices, "identity" | "projectStore">) {
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
   /** The signed-in account's private formal Projects, newest first. */
-  const [cloudProjects, setCloudProjects] = useState<
+  const [cloudProjects, setCloudProjectsState] = useState<
     readonly CloudProjectSummary[]
   >([]);
+  const cloudProjectsRef =
+    useRef<readonly CloudProjectSummary[]>(cloudProjects);
+  const setCloudProjects: Dispatch<
+    SetStateAction<readonly CloudProjectSummary[]>
+  > = useCallback((next) => {
+    const resolved =
+      typeof next === "function" ? next(cloudProjectsRef.current) : next;
+    cloudProjectsRef.current = resolved;
+    setCloudProjectsState(resolved);
+  }, []);
   const [cloudProjectsReady, setCloudProjectsReady] = useState(false);
   const cloudListRequestRef = useRef(0);
   const cloudListMutationRef = useRef(0);
@@ -61,6 +78,7 @@ export function useCloudProjects({
   return {
     sessionUser,
     cloudProjects,
+    currentCloudProjects: () => cloudProjectsRef.current,
     setCloudProjects,
     cloudProjectsReady,
     cloudListMutationRef,
