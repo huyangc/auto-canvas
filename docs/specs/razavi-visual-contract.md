@@ -156,21 +156,18 @@ controlled-source pseudo-symbol without an approved primitive set.
 ## Pixel fidelity
 
 `fixtures/visual-reference/razavi-reference-v1/fidelity-targets.json`
-is the single hash-pinned registry of Symbol targets. Before approving any
-geometry or typography change to a registered symbol, complete all three checks.
+is the single hash-pinned registry of Symbol targets. The one-off pixel-diff
+calibration CLI (`tools/calibration/razavi/`) has been retired, so automated
+spatial diff PNGs and fractional-origin overlay comparisons are no longer part
+of the approval gate. Before approving any geometry or typography change to a
+registered symbol, complete the runnable repository checks:
 
 1. Run `pnpm symbols:razavi:check` and `pnpm components:check` to verify the
    pinned evidence hashes, measurements and generated catalogs.
-2. For every affected target, visually compare the rendered candidate with its
-   pinned reference raster or PDF crop witness in
-   `fixtures/visual-reference/razavi-reference-v1/` as a same-scale, same-origin
-   overlay or side-by-side view using the target's recorded scale, origin
-   (preserving subpixel offset), rotation, and fixed reference-owned crop window
-   on both sides (never independently fitting or resizing either side). Cover
-   each registered orientation, sample and variant, even when no golden project
-   uses the symbol.
-3. Run `pnpm visual:golden:check` and `pnpm export:golden:check` to verify
-   formal scene renders and exports against their goldens.
+2. Run `pnpm visual:golden:check` and `pnpm export:golden:check` to verify
+   formal scene renders and exports against their goldens (adding or updating a
+   golden case when introducing new visual behavior not already exercised by an
+   existing scene).
 
 ## Failure behavior
 
