@@ -260,6 +260,7 @@ function placePowerMarkers(
   resolver: SymbolResolver,
   roles: NetRoles,
   targets: Map<string, Placement>,
+  fixed: ReadonlySet<string>,
 ) {
   const grid = document.presentation.grid;
   const contacts = touchingPins(document, resolver);
@@ -299,16 +300,32 @@ function placePowerMarkers(
     }
   }
   const used = new Map<string, number>();
+  const fixedMarkers = document.instances.filter(
+    (m) => isMarker(m) && fixed.has(m.id) && Boolean(m.placement),
+  );
   const placed: Instance[] = [];
   const free = (i: Instance) =>
     !geometryProblem(
       withPlacements(
-        { ...document, instances: [...devices, ...placed, i] },
+        {
+          ...document,
+          instances: [
+            ...devices,
+            ...fixedMarkers.filter((m) => m.id !== i.id),
+            ...placed,
+            i,
+          ],
+        },
         targets,
       ),
       resolver,
     );
   for (const i of markers) {
+    if (fixed.has(i.id) && i.placement) {
+      targets.set(i.id, structuredClone(i.placement));
+      placed.push(i);
+      continue;
+    }
     const ground = i.symbolId === "ground";
     const local = devicePins(i, resolver)[0]?.at ?? { x: 0, y: 0 };
     const pair = assignments.get(i.id);
@@ -976,15 +993,24 @@ export function placeMarkers(
     targets,
   );
   const pins = pinPoints(deviceDocument, resolver);
-  const power = document.instances
-    .filter((i) => ["ground", "vdd-port"].includes(i.symbolId))
-    .sort((a, b) => compareIds(a.id, b.id));
-  placePowerMarkers(document, power, devices, pins, resolver, roles, targets);
-  // Fixed markers keep their seats, so R71 and R20 must treat them as occupied:
-  // restore fixed power markers and ports before any port seat is checked.
+  // Fixed markers keep their seats, so power-marker, R71, and R20 seat checks
+  // must treat them as occupied before any marker seat is chosen.
   for (const i of document.instances)
     if (fixed.has(i.id) && i.placement && isMarker(i))
       targets.set(i.id, structuredClone(i.placement));
+  const power = document.instances
+    .filter((i) => ["ground", "vdd-port"].includes(i.symbolId))
+    .sort((a, b) => compareIds(a.id, b.id));
+  placePowerMarkers(
+    document,
+    power,
+    devices,
+    pins,
+    resolver,
+    roles,
+    targets,
+    fixed,
+  );
   const fixedPorts = new Set(
     document.instances
       .filter(

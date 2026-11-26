@@ -2185,6 +2185,7 @@ function planAutoLayoutMeasured(
         aprDetailPlace(document, basePreview.document, resolver, fixed, {
           unsplitSymmetry: options.unsplitSymmetry ?? false,
           mirrorSymmetry: options.mirrorSymmetry ?? false,
+          stopped,
         }),
       );
       if (!apr.improved || !apr.candidates.length) return annealedBaseline;

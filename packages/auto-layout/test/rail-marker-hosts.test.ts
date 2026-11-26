@@ -5,8 +5,12 @@ import { createEmptyProject, routeEndpoints } from "@icm/model";
 import type { SchematicDocument } from "@icm/model";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { planAutoLayout } from "../src/auto-layout.js";
-import { pinPoints, placement } from "../src/geometry.js";
+import { pinPoints, placement, withPlacements } from "../src/geometry.js";
+import { classifyNets } from "../src/net-roles.js";
+import { recognizeStructures } from "../src/recognize.js";
+import { freezePinGroups, routeDocument } from "../src/route.js";
 import { floatingPins, missingConnections } from "../src/routing-audit.js";
+import { restorePinGroups } from "../src/transaction.js";
 import { circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
@@ -524,5 +528,197 @@ describe("T127 rail markers sit at the pin they serve", () => {
     const v1Pin = after.instances.find((i) => i.id === "v1")!.placement!;
     // Marker moved outward left of XM.VDD (x < 150) instead of colliding at x=150, y=200.
     expect(v1Pin.position.x).toBeLessThan(150);
+  });
+
+  it("skips a fixed port occupying the nearest sideways power-marker seat (T189)", () => {
+    const macroSymbol = {
+      schemaVersion: 1 as const,
+      id: "side-vdd-macro-fixed-port",
+      name: "Side VDD Macro Fixed Port",
+      viewBox: { x: -50, y: -30, width: 100, height: 80 },
+      pins: [
+        {
+          name: "iref",
+          role: "input",
+          at: { x: -50, y: 0 },
+          direction: "west" as const,
+          presentation: { visibility: "visible" as const },
+        },
+        {
+          name: "VDD",
+          role: "power",
+          at: { x: -50, y: 40 },
+          direction: "west" as const,
+          presentation: { visibility: "visible" as const },
+        },
+        {
+          name: "out",
+          role: "output",
+          at: { x: 50, y: 0 },
+          direction: "east" as const,
+          presentation: { visibility: "visible" as const },
+        },
+      ],
+      primitives: [
+        {
+          kind: "polygon" as const,
+          fill: "none" as const,
+          points: [
+            { x: -50, y: -30 },
+            { x: 50, y: -30 },
+            { x: 50, y: 50 },
+            { x: -50, y: 50 },
+          ],
+        },
+      ],
+      variants: [],
+    };
+    const macroResolver = new InMemorySymbolResolver([
+      ...builtInSymbols,
+      macroSymbol,
+    ]);
+    const document = circuit(
+      {
+        XM: "side-vdd-macro-fixed-port",
+        R1: "resistor",
+        v1: "vdd-port",
+        P_BLK: "port",
+      },
+      {
+        sig: ["XM.iref", "R1.2"],
+        vdd: ["XM.VDD", "v1.P"],
+        other: ["R1.1", "P_BLK.P"],
+      },
+    );
+    document.instances.find((i) => i.id === "XM")!.placement = placement(
+      200,
+      200,
+    );
+    document.instances.find((i) => i.id === "R1")!.placement = placement(
+      60,
+      100,
+    );
+    document.instances.find((i) => i.id === "v1")!.placement = placement(
+      150,
+      240,
+    );
+    // Fixed port sitting directly on the nearest sideways offset (130, 200).
+    document.instances.find((i) => i.id === "P_BLK")!.placement = placement(
+      130,
+      200,
+      "horizontal",
+    );
+    document.netlist = {
+      name: "cell",
+      formalParameters: [],
+      terminals: [
+        {
+          id: "p-blk-terminal",
+          name: "OUT",
+          netId: "other",
+          direction: "output",
+          interfaceInstanceIds: ["P_BLK"],
+        },
+      ],
+    };
+    const plan = planAutoLayout(document, macroResolver, {
+      fixedInstanceIds: new Set(["XM", "R1", "P_BLK"]),
+      search: { seed: 1, evaluations: 0 },
+    });
+    expect(plan.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    const tx = executeTransaction(
+      document,
+      {
+        transactionId: "side-vdd-fixed-port",
+        documentId: document.id,
+        expectedRevision: document.revision,
+        actor: { kind: "agent", id: "test" },
+        edits: plan.edits,
+      },
+      { symbolResolver: macroResolver },
+    );
+    expect(tx.ok && tx.applied).toBe(true);
+    if (!tx.ok) throw new Error("transaction failed");
+    expect(missingConnections(tx.document, macroResolver)).toBe(0);
+    expect(floatingPins(tx.document, macroResolver)).toEqual([]);
+    const v1Pose = tx.document.instances.find((i) => i.id === "v1")!.placement!;
+    // Skipped (130, 200) occupied by fixed P_BLK and seated further outward.
+    expect(v1Pose.position.x).toBeLessThan(130);
+  });
+
+  it("falls through to the tree router when a separated touching-pin contact stub is blocked (T189)", () => {
+    const document = circuit(
+      {
+        R1: "resistor",
+        R2: "resistor",
+        R3: "resistor",
+        B1: "resistor",
+      },
+      {
+        sig: ["R1.2", "R2.1", "R3.1"],
+        blk: ["B1.1", "B1.2"],
+      },
+    );
+    // In the input, R1.2 and R2.1 touch at (100, 120), recording an R38 contact.
+    document.instances.find((i) => i.id === "R1")!.placement = placement(
+      100,
+      100,
+    );
+    document.instances.find((i) => i.id === "R2")!.placement = placement(
+      100,
+      140,
+    );
+    document.instances.find((i) => i.id === "R3")!.placement = placement(
+      340,
+      200,
+    );
+    document.instances.find((i) => i.id === "B1")!.placement = placement(
+      220,
+      120,
+    );
+    const frozen = freezePinGroups(document, resolver);
+    expect(frozen.some((g) => g.contacts.length > 0)).toBe(true);
+    // Separate R1 and R2 across intervening obstacle B1 so the direct R38
+    // touching-pin stub is blocked while the 3-pin tree covers both pins.
+    const moved = withPlacements(
+      document,
+      new Map([
+        ["R1", placement(100, 100)],
+        ["B1", placement(220, 120)],
+        ["R2", placement(340, 140)],
+        ["R3", placement(340, 260)],
+      ]),
+    );
+    const restoreEdits = restorePinGroups(frozen, moved, resolver);
+    const routeInput = restoreEdits.length
+      ? (() => {
+          const restoredTx = executeTransaction(
+            moved,
+            {
+              transactionId: "restore-contact-fallback",
+              documentId: moved.id,
+              expectedRevision: moved.revision,
+              actor: { kind: "agent", id: "test" },
+              edits: restoreEdits,
+            },
+            { symbolResolver: resolver },
+          );
+          expect(restoredTx.ok).toBe(true);
+          if (!restoredTx.ok) throw new Error("restore failed");
+          return restoredTx.document;
+        })()
+      : moved;
+    const roles = classifyNets(routeInput, resolver);
+    const routed = routeDocument(
+      routeInput,
+      resolver,
+      frozen,
+      roles,
+      recognizeStructures(routeInput, roles),
+      true,
+    );
+    expect(routed.problem).toBeUndefined();
+    expect(missingConnections(routed.document, resolver)).toBe(0);
+    expect(floatingPins(routed.document, resolver)).toEqual([]);
   });
 });
