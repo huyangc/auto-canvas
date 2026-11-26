@@ -392,7 +392,8 @@ it("preserves the typed rename draft on save failure so the user can retry or ed
   });
   expect(onOpenProject).toHaveBeenCalledWith("amp");
 
-  // Pressing Enter explicitly retries and succeeds.
+  // Pressing Enter explicitly retries and succeeds without blocking on the
+  // background shelf refresh.
   await act(async () => {
     preserved.focus();
     preserved.dispatchEvent(
@@ -405,6 +406,102 @@ it("preserves the typed rename draft on save failure so the user can retry or ed
   expect(
     container.querySelector('button[aria-label="Rename Draft OTA"]'),
   ).not.toBeNull();
+});
+
+it("clears a rename error on Escape discard and does not block flush on a stalled post-rename refresh", async () => {
+  const project = createEmptyProject("amp", "Amp");
+  const summary = {
+    id: "amp",
+    name: "Amp",
+    updatedAt: "2026-11-06T00:00:00Z",
+    revision: 1,
+    schemaVersion: project.schemaVersion,
+    favorite: false,
+  };
+  let initialLoaded = false;
+  let resolveRefresh!: (response: Response) => void;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(async () => {
+      if (!initialLoaded) {
+        initialLoaded = true;
+        return Response.json({ projects: [{ ...summary }], limit: 200 });
+      }
+      return new Promise<Response>((resolve) => {
+        resolveRefresh = resolve;
+      });
+    }),
+  );
+  let failOnce = true;
+  const onRenameProject = vi.fn(async (_id: string, name: string) => {
+    if (failOnce) {
+      failOnce = false;
+      throw new Error("Save failed");
+    }
+    summary.name = name;
+  });
+  const flushRenameRef: {
+    current: (() => boolean | Promise<boolean>) | null;
+  } = { current: null };
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () =>
+    root!.render(createElement(ShelfWall, { onRenameProject, flushRenameRef })),
+  );
+
+  // Trigger a failed rename, then press Escape: error banner clears cleanly.
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>('button[aria-label="Rename Amp"]')!
+      .click(),
+  );
+  const input = container.querySelector<HTMLInputElement>(
+    "input.shelf-tile-name-input",
+  )!;
+  const setter = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value",
+  )!.set!;
+  await act(async () => {
+    setter.call(input, "Bad Draft");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+  });
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+    "Save failed",
+  );
+  await act(async () => {
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+  });
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+
+  // A successful rename resolves flushRenameRef even while the background
+  // refresh fetch is still pending.
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>('button[aria-label="Rename Amp"]')!
+      .click(),
+  );
+  const nextInput = container.querySelector<HTMLInputElement>(
+    "input.shelf-tile-name-input",
+  )!;
+  await act(async () => {
+    setter.call(nextInput, "Amp v2");
+    nextInput.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  let flushed: boolean | undefined;
+  await act(async () => {
+    flushed = await flushRenameRef.current?.();
+  });
+  expect(flushed).toBe(true);
+  await act(async () => {
+    resolveRefresh(Response.json({ projects: [{ ...summary }], limit: 200 }));
+  });
 });
 
 it("dismisses an open quick-delete confirmation on Escape even after focus moves outside it", async () => {
