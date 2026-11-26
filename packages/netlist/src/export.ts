@@ -139,52 +139,6 @@ function applyPortCase(ir: DesignNetlistIR, portCase: NetlistPortCase): void {
 }
 
 /**
- * Which version of the extractability rule a stored mark reflects: a Cell
- * extracts when `createDesignNetlistExport` is ready and
- * `unfinishedDrawingDiagnostics` finds nothing (`eda/snapshot.mjs` records it).
- *
- * A stored mark is only as good as the rule that produced it, and the rule
- * moves: a body that now follows the drawn supply, a dead-end node that now
- * refuses, a Block supply that is now declared. Bump this whenever a change
- * can turn a stored answer stale, and everything that keeps marks can find
- * the ones it has to ask again.
- *
- * 3 answers with logic Blocks carrying a subcircuit interface, persisted
- * bindings read for every circuit, a Cell stating its ground as its own VSS
- * pin, and a stranded MOS body read as residue.
- * 4 also resolves unconnected schematic MOS bodies without supply symbols.
- * 5 refuses missing model targets and required parameters instead of emitting
- * placeholder identifiers.
- * 6 writes Greek letters in Net, Pin, device and Cell names as their standard
- * names, so a circuit named with them now extracts.
- * 7 writes drawn switches as SPICE `S` cards on the phase their label names,
- * so a switched-capacitor circuit whose switches carry phases now extracts.
- * 8 writes drawn T-coils and transformers as calls on built-in coupled-winding
- * subcircuits, so a circuit drawn with them now extracts.
- * 9 recognizes an explicit Zener BV as a local diode model and a new ideal
- * comparator target as a signal-only ngspice subcircuit.
- * 10 refuses built-in subcircuit targets without an emitted or external
- * definition, including the reviewed logic-symbol set.
- * 11 writes ideal bodies for the logic gates and flip-flops, the adder,
- * multiplier and converters, and ties the unused supplies of an ideal block
- * that never reads them to node 0, so circuits drawn with them now extract.
- * Version 10 had marked those circuits "no netlist" while they still failed.
- * 12 writes a bus bit's brackets as `_` in SPICE (`D<3>` is `D_3_`) and reads
- * full-width characters as their ASCII forms, so a circuit naming Nets or
- * Pins with them now extracts; and a Block whose body reads its supplies, in a
- * Cell that draws none, takes the default an unconnected MOS body takes, so a
- * logic figure drawn without supplies now extracts.
- * 13 reads a Var Cap bound to the SKY130 varactor as the ideal Var Cap it now
- * opens as (#1298): a circuit that part alone blocked extracts when it kept a
- * value.
- * 14 refuses invalid portable component interfaces and calls that contradict
- * a generated built-in model's fixed port order or pin mapping (#1393).
- * 15 refuses unimplemented external placeholders and unverified legacy
- * declarations whose original model bodies are absent from the Project.
- */
-export const NETLIST_MARK_RULE_VERSION = 15;
-
-/**
  * Export the circuit exactly as its persisted netlist bindings describe it.
  * Missing device values or models block output; this path never substitutes a
  * different process, model target or device invocation kind.

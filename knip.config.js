@@ -18,7 +18,7 @@ const production = process.argv.some(
   (arg) => arg === "--production" || arg === "-p",
 );
 
-// Scripts and tools import packages' built output (`../packages/x/dist/y.js`),
+// Scripts import packages' built output (`../packages/x/dist/y.js`),
 // which an unbuilt checkout lacks: read each package's source instead.
 const builtPackageSources = Object.fromEntries(
   readdirSync("packages").flatMap((name) =>
@@ -45,21 +45,16 @@ export default {
     ".": {
       entry: [
         "scripts/*.mjs!",
-        "tools/**/*.mjs!",
         // The batch runner's scripted Agent, run as a command (#1498).
         "scripts/lib/draw-batch-script-agent.mjs!",
         // `scripts/dev.sh` runs the editor under it.
         "scripts/lib/editor-supervisor.mjs!",
-        // Commands that load packages by name or from dist/: the EDA export
-        // tools, circuit acceptance scripts and task scripts.
-        "eda/{build,export,snapshot}.mjs!",
+        // Circuit acceptance and task scripts load packages by name or from dist/.
         "netlists/*/verify.mjs!",
         "tasks/*/*.mjs!",
       ],
       project: [
         "scripts/**/*.mjs!",
-        "tools/**/*.mjs!",
-        "eda/**/*.mjs!",
         "netlists/**/*.{mjs,ts}!",
         "tasks/**/*.mjs!",
         ...testSupport,
@@ -93,9 +88,6 @@ export default {
       project: ["src/**/*.ts!", ...testSupport],
     },
     "apps/server": {
-      project: ["src/**/*.ts!", ...testSupport],
-    },
-    "apps/local-host": {
       project: ["src/**/*.ts!", ...testSupport],
     },
     "packages/*": {

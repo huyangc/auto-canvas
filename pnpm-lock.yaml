@@ -50,9 +50,6 @@ importers:
       oxlint-tsgolint:
         specifier: 7.0.2003
         version: 7.0.2003
-      pngjs:
-        specifier: ^7.0.0
-        version: 7.0.0
       prettier:
         specifier: 3.9.6
         version: 3.9.6
@@ -177,8 +174,6 @@ importers:
       fake-indexeddb:
         specifier: ^6.2.5
         version: 6.2.7
-
-  apps/local-host: {}
 
   apps/mcp-server:
     dependencies:
@@ -2938,13 +2933,6 @@ packages:
     engines: { node: ">=20" }
     hasBin: true
 
-  pngjs@7.0.0:
-    resolution:
-      {
-        integrity: sha512-LKWqWJRhstyYo9pGvgor/ivk2w94eSjE3RGVuzLGlr3NmD8bf7RcYGze1mNdEHRP6TRP6rMuDHk5t44hnTRyow==,
-      }
-    engines: { node: ">=14.19.0" }
-
   postcss@8.5.25:
     resolution:
       {
@@ -4682,8 +4670,6 @@ snapshots:
       playwright-core: 1.62.1
     optionalDependencies:
       fsevents: 2.3.2
-
-  pngjs@7.0.0: {}
 
   postcss@8.5.25:
     dependencies:

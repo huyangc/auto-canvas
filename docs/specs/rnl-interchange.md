@@ -57,7 +57,7 @@ the RNL language and its runtime belong to rnl.
 - For RNL formats, the panel’s "About RNL" link opens the introduction to RNL
   (<https://rich-netlist.github.io/rnl/en/>) in a new tab. Builds that disable
   external links omit it. The editor has one language, so there is one page.
-- In the Web and local-host compositions, **Open RNL Viewer** follows About
+- In the Web editor, **Open RNL Viewer** follows About
   RNL. It is enabled only for the current completed RNL export. A synchronous
   click opens the full online Viewer, reusing its connected tab without
   navigating away from Viewer edits, and sends the `.sp` or `.scs` text with
@@ -66,9 +66,6 @@ the RNL language and its runtime belong to rnl.
   check origin, window identity, launch token and request ID. Netlist text
   stays out of URLs and upload services. Popup blocking, missing capabilities,
   import errors and timeouts are reported with retry available.
-  Local-host uses `same-origin-allow-popups`
-  and allows capability discovery at the Viewer host; cross-origin isolation
-  is not required by this composition.
 - Bodies the netlist writes itself (ideal blocks, magnetics) print their ports
   in the terminal order of their RNL symbol: SPICE primitives in SPICE order,
   op-amps as their macromodels do (in+ in− V+ V− out), other blocks signals
@@ -482,8 +479,6 @@ the RNL language and its runtime belong to rnl.
   and label written, and name only `analog-canvas-extensions` beside
   `rnl-std` (each Cell's `$CANVAS_TYPESETTING`); an op-amp also names
   `rnl-std-functional` (`packages/rnl/src/export-ops.test.ts`).
-- Local hosts serve `.wasm` as `application/wasm` and allow
-  WebAssembly compilation only (`apps/local-host/src/local-host.test.ts`).
 - A file the export wrote imports with every part where it was drawn, its
   labels, block layout, marks and shapes, its pins left open on the top and
   inside Cells, and the same netlist; 4-input gates

@@ -6,9 +6,7 @@ Owners: `fixtures/visual-reference`, `packages/components`, `packages/symbols`, 
 `packages/render-svg`, `scripts`
 
 The sole Razavi-specific contract: visual authority, construction, exposure
-and pixel fidelity. Commands live in the [component guide](../../packages/components/README.md),
-[calibration tools](../../tools/calibration/razavi/README.md) and
-[PDF extractor](../../tools/pdf-vector-extract/README.md).
+and pixel fidelity. Commands live in the [component guide](../../packages/components/README.md).
 
 ## Provenance
 
