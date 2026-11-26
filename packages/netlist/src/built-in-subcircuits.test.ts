@@ -605,6 +605,28 @@ describe("built-in Analog Block subcircuits", () => {
     );
   });
 
+  it("shares one D flip-flop definition across two calls in pin order", () => {
+    const project = analogBlockProject(
+      ["d-flip-flop", "d-flip-flop"],
+      [
+        ["D", "d"],
+        ["CK", "ck"],
+        ["Q", "q"],
+        ["QBAR", "qb"],
+      ],
+    );
+    const result = createDesignNetlistExport(project);
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.file.text.match(/^\.subckt d_flip_flop\b/gmu)).toHaveLength(
+      1,
+    );
+    expect(result.file.text).toMatch(/^X1 VDD VSS d ck q qb d_flip_flop$/mu);
+    expect(result.file.text).toMatch(
+      /^X2 VDD VSS d1 ck1 q1 qb1 d_flip_flop$/mu,
+    );
+  });
+
   it.each(["and", "nand", "or", "nor", "xor", "xnor"])(
     "exports every four-input %s terminal in its declared electrical order",
     (family) => {

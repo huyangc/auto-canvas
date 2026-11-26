@@ -18,6 +18,7 @@ import {
 } from "@icm/derived";
 import {
   type DesignNetlistCell,
+  type NetlistFileDescriptor,
   createDesignNetlistExport,
 } from "@icm/netlist";
 import { parseProject, serializeProject } from "@icm/project-protocol";
@@ -131,7 +132,52 @@ const resistor = (id: string, value: string) => ({
   },
 });
 
+function exportedCellLines(
+  file: NetlistFileDescriptor,
+  cell: DesignNetlistCell,
+) {
+  const lines = file.text.replace(/\n\+ /gu, " ").split("\n");
+  const ports = cell.ports.map((port) => port.name).join(" ");
+  const spice = file.extension === ".spi";
+  const header = spice
+    ? `.subckt ${cell.name} ${ports}`.trimEnd()
+    : `subckt ${cell.name}${ports ? ` (${ports})` : ""}`;
+  const start = lines.indexOf(header);
+  const end = lines.indexOf(
+    `${spice ? ".ends" : "ends"} ${cell.name}`,
+    start + 1,
+  );
+  expect(start, header).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  return lines.slice(start + 1, end);
+}
+
+function expectResistorWiring(
+  file: NetlistFileDescriptor,
+  child: DesignNetlistCell,
+  index: number,
+  inputPort: number,
+  outputPort: number,
+) {
+  const reference = `R${index}`;
+  const resistor = child.instances.find(
+    (item) => item.reference === reference,
+  )!;
+  const endpoints = [
+    child.ports[inputPort]!.netName,
+    child.ports[outputPort]!.netName,
+  ];
+  expect(resistor.nodes.map((node) => node.netName)).toEqual(endpoints);
+  const nodes = endpoints.join(" ");
+  expect(exportedCellLines(file, child)).toContain(
+    file.extension === ".spi"
+      ? `${reference} ${nodes} 1k`
+      : `${reference} (${nodes}) resistor r=1k`,
+  );
+}
+
 function expectCallWiring(
+  file: NetlistFileDescriptor,
   top: DesignNetlistCell,
   target: string,
   variant: string,
@@ -152,10 +198,17 @@ function expectCallWiring(
     ...inputPins,
     ...outputs.map((_, index) => `OUT<${outputs.length - 1 - index}>`),
   ]);
-  expect(call.nodes.map((node) => node.netName)).toEqual([
+  const expectedNodes = [
     ...sourceOrder.map((index) => netAt(`V${index}`, "+")),
     ...outputs,
-  ]);
+  ];
+  expect(call.nodes.map((node) => node.netName)).toEqual(expectedNodes);
+  const nodes = expectedNodes.join(" ");
+  expect(exportedCellLines(file, top)).toContain(
+    file.extension === ".spi"
+      ? `${call.reference} ${nodes} ${target}`
+      : `${call.reference} (${nodes}) ${target}`,
+  );
   expect(new Set(call.nodes.map((node) => node.netName)).size).toBe(
     2 * inputPins.length,
   );
@@ -163,6 +216,7 @@ function expectCallWiring(
 }
 
 function expectBusPassWiring(
+  file: NetlistFileDescriptor,
   child: DesignNetlistCell,
   top: DesignNetlistCell,
   migrated: boolean,
@@ -173,17 +227,11 @@ function expectBusPassWiring(
     : ["IN<3>", "IN<2>", "IN<1>", "IN<0>"];
   const forward = [0, 1, 2, 3];
   const backward = [3, 2, 1, 0];
-  for (const i of forward) {
-    const resistor = child.instances.find(
-      (instance) => instance.reference === `R${i}`,
-    )!;
-    expect(resistor.nodes.map((node) => node.netName)).toEqual([
-      child.ports[migrated ? 3 - i : i]!.netName,
-      child.ports[4 + i]!.netName,
-    ]);
-  }
+  for (const i of forward)
+    expectResistorWiring(file, child, i, migrated ? 3 - i : i, 4 + i);
   return [
     ...expectCallWiring(
+      file,
       top,
       child.name,
       "identity",
@@ -192,6 +240,7 @@ function expectBusPassWiring(
       ids,
     ),
     ...expectCallWiring(
+      file,
       top,
       child.name,
       "reverse",
@@ -377,7 +426,7 @@ function busDcFixture(migrate = false) {
       expect(exported.file.text).toContain(".subckt bus_pass");
     }
     const topIR = exported.ir!.cells.find((cell) => cell.id === top.id)!;
-    const outputs = expectBusPassWiring(childIR, topIR, migrate);
+    const outputs = expectBusPassWiring(exported.file, childIR, topIR, migrate);
     expect(new Set(outputs).size).toBe(8);
   }
   return { project };
@@ -528,6 +577,7 @@ function copiedBusDcFixture() {
       (cell) => cell.name === "bus_pass",
     )!;
     const outputs = expectBusPassWiring(
+      exported.file,
       childIR,
       topIR,
       true,
@@ -714,20 +764,34 @@ function slicedBusDcFixture() {
         : ["IN\\<1\\>", "IN\\<0\\>", "OUT\\<1\\>", "OUT\\<0\\>"],
     );
     const topIR = exported.ir!.cells.find((cell) => cell.id === "top")!;
-    for (const i of [0, 1]) {
-      const resistor = childIR.instances.find(
-        (instance) => instance.reference === `R${i}`,
-      )!;
-      expect(resistor.nodes.map((node) => node.netName)).toEqual([
-        childIR.ports[i]!.netName,
-        childIR.ports[2 + i]!.netName,
-      ]);
-    }
+    for (const i of [0, 1])
+      expectResistorWiring(exported.file, childIR, i, i, 2 + i);
     const inputs = ["IN<1>", "IN<0>"];
     const outputs = [
-      ...expectCallWiring(topIR, "slice_pass", "nested", inputs, [2, 3]),
-      ...expectCallWiring(topIR, "slice_pass", "reorder", inputs, [1, 0]),
-      ...expectCallWiring(topIR, "slice_pass", "range", inputs, [2, 3]),
+      ...expectCallWiring(
+        exported.file,
+        topIR,
+        "slice_pass",
+        "nested",
+        inputs,
+        [2, 3],
+      ),
+      ...expectCallWiring(
+        exported.file,
+        topIR,
+        "slice_pass",
+        "reorder",
+        inputs,
+        [1, 0],
+      ),
+      ...expectCallWiring(
+        exported.file,
+        topIR,
+        "slice_pass",
+        "range",
+        inputs,
+        [2, 3],
+      ),
     ];
     expect(new Set(outputs).size).toBe(6);
   }
