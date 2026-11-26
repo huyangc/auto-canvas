@@ -1,3 +1,7 @@
+import {
+  decoupledSignalPortClusters,
+  isPortSymbol,
+} from "./multi-port-nets.js";
 import { planningMemo } from "./planning-reuse.js";
 import {
   deriveElectricalTopologyProjection,
@@ -125,6 +129,7 @@ export interface PinGroup {
   pins: TerminalRef[];
   named: boolean;
   contacts: PinContact[];
+  portAssociations?: PinContact[];
   needsPowerStub: boolean;
 }
 
@@ -170,7 +175,28 @@ export function freezePinGroups(
   const removed = new Set(
     [...document.routes, ...document.junctions].map((o) => o.id),
   );
+  const instances = new Map(document.instances.map((i) => [i.id, i]));
   for (const group of groups.values()) {
+    const byComponent = new Map<string, TerminalRef[]>();
+    for (const pin of group.pins) {
+      const component = projection.endpointToPhysicalComponent.get(
+        endpointKey({ kind: "terminal", ...pin }),
+      );
+      if (component === undefined) continue;
+      const members = byComponent.get(component) ?? [];
+      members.push(pin);
+      byComponent.set(component, members);
+    }
+    for (const members of byComponent.values()) {
+      const ports = members.filter((p) =>
+        isPortSymbol(instances.get(p.instanceId)!.symbolId),
+      );
+      if (ports.length !== 1) continue;
+      for (const pin of members) {
+        if (!isMarker(instances.get(pin.instanceId)!))
+          (group.portAssociations ??= []).push([ports[0]!, pin]);
+      }
+    }
     group.contacts = contacts.filter((pair) =>
       pair.every((p) => group.pins.some((ref) => samePin(ref, p))),
     );
@@ -534,6 +560,18 @@ function routeGroup(
   const diagnostics: AutoLayoutDiagnostic[] = [];
   const power = (g: PinGroup) =>
     ["supply", "ground"].includes(roles.byNet.get(g.netId) ?? "");
+  const points = pinPoints(working, resolver);
+  const clusters = power(group)
+    ? undefined
+    : decoupledSignalPortClusters(
+        working,
+        group.netId,
+        group.pins,
+        roles,
+        group.contacts,
+        points,
+        group.portAssociations,
+      );
   const targets: RoutingTarget[] = power(group)
     ? powerTargets(
         working,
@@ -542,10 +580,20 @@ function routeGroup(
         roles.byNet.get(group.netId) as "supply" | "ground",
         roles.rails.has(group.netId),
       )
-    : [{ pins: group.pins }];
+    : (clusters?.map((c) => ({ pins: [c.port, ...c.hosts] })) ?? [
+        { pins: group.pins },
+      ]);
   // R38: freeze and wire direct contacts on every Net before the general tree.
   // Whole-list reconciliation then has no missing physical connection to add.
   const contacts = group.contacts.filter((pair) => {
+    if (
+      clusters?.some(
+        (c) =>
+          pair.some((p) => samePin(p, c.port)) &&
+          pair.some((p) => c.hosts.some((h) => samePin(h, p))),
+      )
+    )
+      return false;
     const [a, b] = pair.map(
       (ref) => points.find((p) => samePin(ref, p))!.point,
     );

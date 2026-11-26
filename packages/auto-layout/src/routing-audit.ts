@@ -1,9 +1,11 @@
+import { isPortSymbol, isNamedPort } from "./multi-port-nets.js";
 import { planningMemo } from "./planning-reuse.js";
 import {
   deriveElectricalTopologyProjection,
   endpointKey,
   isVisibleEndpoint,
   resolveRouteGeometry,
+  resolveDocumentLogicalNets,
   visibleInstanceBounds,
 } from "@icm/derived";
 import { routeEndpoints, type Point, type SchematicDocument } from "@icm/model";
@@ -88,6 +90,7 @@ function netComponents(
   }
   // T071: named marker components are complete local rail trees. Unmarked
   // components still need drawn joins; floatingPins remains purely physical.
+  const powerComponents = new Map<string, Map<string, string>>();
   for (const [netId, markers] of candidates) {
     if (new Set(markers.map((p) => p.component)).size < 2) continue;
     const claim = railMarkerClaim(document, netId);
@@ -97,6 +100,7 @@ function netComponents(
       const instance = document.instances.find((i) => i.id === pin.instanceId)!;
       marked.set(pin.component, `${netId}:${instance.symbolId}:${claim.name}`);
     }
+    powerComponents.set(netId, marked);
     components.set(
       netId,
       new Set(
@@ -105,6 +109,36 @@ function netComponents(
         ),
       ),
     );
+  }
+  const ports = new Set(
+    document.instances.filter((i) => isPortSymbol(i.symbolId)).map((i) => i.id),
+  );
+  const markedByNet = new Map<string, Set<string>>();
+  let names: Map<string, string | undefined> | undefined;
+  for (const pin of pins) {
+    const net = pin.netId;
+    if (
+      !net ||
+      (components.get(net)?.size ?? 0) < 2 ||
+      !ports.has(pin.instanceId)
+    )
+      continue;
+    names ??= new Map(
+      [...resolveDocumentLogicalNets(document).byBaseNetId].map(([id, n]) => [
+        id,
+        n.name,
+      ]),
+    );
+    if (!isNamedPort(document, pin.instanceId, net, names)) continue;
+    const marked = markedByNet.get(net) ?? new Set<string>();
+    marked.add(powerComponents.get(net)?.get(pin.component) ?? pin.component);
+    markedByNet.set(net, marked);
+  }
+  for (const [net, marked] of markedByNet) {
+    if (marked.size < 2) continue;
+    const group = components.get(net)!;
+    for (const component of marked) group.delete(component);
+    group.add(`${net}:named-port`);
   }
   return components;
 }
