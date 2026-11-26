@@ -58,6 +58,7 @@ Owned paths (may be created, edited or deleted):
 - `docs/adr/persistence.md`
 - `docs/specs/razavi-visual-contract.md`
 - `docs/specs/rnl-interchange.md`
+- `apps/server/src/base-path.test.ts`
 - `.gitignore` (only if removing `tools/`-specific comments; keep unrelated lines untouched)
 - `tasks/T186-remove-local-host-eda-tools/report.md`
 

@@ -156,15 +156,11 @@ controlled-source pseudo-symbol without an approved primitive set.
 ## Pixel fidelity
 
 `fixtures/visual-reference/razavi-reference-v1/fidelity-targets.json`
-(hash-pinned) is the single registry of Symbol targets (no second device table
-in the CLI; full scenes use renderer/export tests). Comparison verifies
-integrity, crops the reference at its recorded origin (subpixel kept),
-rasterizes the Symbol at the same scale, footprint, rotation and origin,
-rejects size mismatch, and reports binary and soft IoU, miss/extra, lift,
-edge-shell ratio and best shift with diff PNGs. Binary IoU is a relative
-regression signal; the shift search is diagnostic and never the baseline;
-approval needs the spatial diff and formal render. Rebuild `packages/*/dist`
-before comparing.
+is the single hash-pinned registry of Symbol targets. To approve geometry or
+typography changes, verify the pinned evidence and generated catalogs with
+`pnpm symbols:razavi:check` and `pnpm components:check`. Verify the resulting
+formal render and exports against their goldens with `pnpm visual:golden:check`
+and `pnpm export:golden:check`.
 
 ## Failure behavior
 

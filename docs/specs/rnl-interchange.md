@@ -513,6 +513,8 @@ the RNL language and its runtime belong to rnl.
   introduction page in a new tab, and under no other format
   (`apps/editor/e2e/rnl-interchange.spec.ts`,
   `apps/editor/src/features/netlist-export/about-rnl-link.test.tsx`).
+- The server serves `.wasm` files under the configured editor base path with
+  the `application/wasm` MIME type (`apps/server/src/base-path.test.ts`).
 - The library's five examples (Common-Source Amplifier, Two-Stage Op Amp,
   Current-Mirror-Loaded Differential Pair, Fully Differential Two-Stage Op
   Amp, Five-Transistor OTA) in either process and either format come back
