@@ -146,6 +146,7 @@ export function EditorMenuBar({
   exportRaster,
   exportDesignNetlist,
   createTabSession,
+  createNewTabSession,
   projectTabs,
   editorMode,
   changeEditorMode,
@@ -231,6 +232,7 @@ export function EditorMenuBar({
   exportRaster: FileCommands["exportRaster"];
   exportDesignNetlist: FileCommands["exportDesignNetlist"];
   createTabSession: ProjectTabSessions["createTabSession"];
+  createNewTabSession: ProjectTabSessions["createNewTabSession"];
   projectTabs: ProjectTabSessions["projectTabs"];
   editorMode: EditorMode;
   /** The switch: an explicit choice, remembered for the next open. */
@@ -274,7 +276,7 @@ export function EditorMenuBar({
   // the user menu's in accounts mode.
   const tabActions = {
     busy: projectTabs.busy || cloudManagementBusy,
-    onNew: () => void projectTabs.open(() => createTabSession()),
+    onNew: () => void projectTabs.open(() => createNewTabSession()),
     onOpenFile: () => tabProjectInputRef.current?.click(),
     onClose: (trigger: HTMLElement | null) => closeActiveTab.current?.(trigger),
   };

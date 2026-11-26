@@ -308,7 +308,7 @@ describe("bundled Library Project examples", () => {
     expect(second).not.toBeNull();
     if (!first || !second) return;
     first.name = "Changed only in this snapshot";
-    expect(second.name).toBe("New Circuit");
+    expect(second.name).toBe("Common-Source Amplifier");
     expect(createLibraryExampleProject("missing-example")).toBeNull();
   });
 

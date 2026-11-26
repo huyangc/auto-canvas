@@ -1339,7 +1339,7 @@
   ],
   "externalSubcircuitDefinitions": [],
   "id": "project-main",
-  "name": "New Circuit",
+  "name": "Current-Mirror-Loaded Differential Pair",
   "schemaVersion": 48,
   "simulationSetups": [],
   "source": {

@@ -81,6 +81,7 @@ export function createAgentWorkspaceHandler({
   openCloudProjectById,
   renameProject,
   createTabSession,
+  createNewTabSession,
   projectSwitchBlocker,
   reserveBackgroundCloudSave,
   projectTabs,
@@ -100,6 +101,7 @@ export function createAgentWorkspaceHandler({
   openCloudProjectById: ProjectFileLifecycle["openCloudProjectById"];
   renameProject: ProjectStructureCommands["renameProject"];
   createTabSession: ProjectTabSessions["createTabSession"];
+  createNewTabSession: ProjectTabSessions["createNewTabSession"];
   projectSwitchBlocker: ProjectTabSessions["projectSwitchBlocker"];
   reserveBackgroundCloudSave: ProjectTabSessions["reserveBackgroundCloudSave"];
   projectTabs: ProjectTabSessions["projectTabs"];
@@ -438,14 +440,20 @@ export function createAgentWorkspaceHandler({
       if (request.action === "new") {
         // A blank working copy, as the tab strip's + opens one.
         const open = new Set(entries.map((item) => item.id));
-        const blank = createEmptyProject(
-          createId("project"),
-          request.name?.trim() || "New Circuit",
-          createId("document"),
-        );
+        const explicitName = request.name?.trim();
+        const makeSession = () =>
+          explicitName
+            ? createTabSession(
+                createEmptyProject(
+                  createId("project"),
+                  explicitName,
+                  createId("document"),
+                ),
+              )
+            : createNewTabSession();
         const applied = request.background
-          ? projectTabs.openBackground(() => createTabSession(blank))
-          : await projectTabs.open(() => createTabSession(blank));
+          ? projectTabs.openBackground(makeSession)
+          : await projectTabs.open(makeSession);
         const workspaceId = projectTabs
           .entries()
           .find((item) => !open.has(item.id))?.id;

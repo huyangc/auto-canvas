@@ -1633,9 +1633,83 @@ function libraryCells(
     : new Set();
 }
 
-function sourceProjectName(bundle: SourceBundle): string {
-  const filename = bundle.entryPath.split("/").at(-1) ?? bundle.entryPath;
-  return filename.replace(/\.[^.]+$/u, "") || "Imported SPICE";
+const MAX_IMPORTED_PROJECT_NAME_LENGTH = 120;
+const GENERIC_ENTRY_FILE_NAMES = new Set([
+  "circuit",
+  "netlist",
+  "top",
+  "main",
+  "dut",
+  "schematic",
+  "index",
+]);
+const GENERIC_CELL_NAMES = new Set([
+  "__flat__",
+  "dut",
+  "top",
+  "circuit",
+  "main",
+  "cell",
+]);
+const GENERIC_DIRECTORY_NAMES = new Set([
+  ".",
+  "..",
+  "src",
+  "netlist",
+  "netlists",
+  "spice",
+  "spectre",
+  "sim",
+  "simulation",
+]);
+
+function clampProjectName(name: string): string {
+  return name.trim().slice(0, MAX_IMPORTED_PROJECT_NAME_LENGTH).trim();
+}
+
+function entryPathSegments(entryPath: string): string[] {
+  return entryPath
+    .split(/[/\\]+/u)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+}
+
+/**
+ * Derive a clean project name for an imported netlist without appending an
+ * import suffix, preferring a meaningful entry filename and keeping original
+ * identifiers intact.
+ */
+export function deriveImportedProjectName(
+  entryPath: string,
+  topCell?: string | null,
+): string {
+  const segments = entryPathSegments(entryPath);
+  const filename = segments.at(-1) ?? "";
+  const fileBaseName = clampProjectName(filename.replace(/\.[^.]+$/u, ""));
+  const parentDirectory =
+    segments.length >= 2 ? clampProjectName(segments.at(-2) ?? "") : "";
+  const rawTopCell = topCell ? clampProjectName(topCell) : "";
+  const usableTopCell =
+    rawTopCell.toLowerCase() === "__flat__" ? "" : rawTopCell;
+
+  if (
+    fileBaseName &&
+    !GENERIC_ENTRY_FILE_NAMES.has(fileBaseName.toLowerCase())
+  ) {
+    return fileBaseName;
+  }
+  if (usableTopCell && !GENERIC_CELL_NAMES.has(usableTopCell.toLowerCase())) {
+    return usableTopCell;
+  }
+  if (
+    parentDirectory &&
+    !GENERIC_DIRECTORY_NAMES.has(parentDirectory.toLowerCase())
+  ) {
+    return parentDirectory;
+  }
+  if (fileBaseName) return fileBaseName;
+  if (usableTopCell) return usableTopCell;
+  return "Untitled";
 }
 
 function importCircuitIR(
@@ -1761,14 +1835,14 @@ function importCircuitIR(
   );
   if (!topDocument)
     throw new Error("Circuit IR has no importable top Document");
-  const name = topCell ?? sourceProjectName(bundle);
+  const name = deriveImportedProjectName(bundle.entryPath, topCell);
   const entryHash = bundle.files.find(
     (file) => file.id === bundle.entryFileId,
   )?.hash;
   const project = CircuitProjectSchema.parse({
     schemaVersion: CURRENT_MODEL_SCHEMA_VERSION,
     id: deriveStableId("project", bundle.entryPath, entryHash ?? "missing"),
-    name: `${name} (SPICE Import)`,
+    name,
     source: {
       entry: bundle.entryPath,
       dialect: ir.dialect,

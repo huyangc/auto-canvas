@@ -803,7 +803,7 @@
   ],
   "externalSubcircuitDefinitions": [],
   "id": "project-main",
-  "name": "New Circuit",
+  "name": "Two-Stage Op Amp",
   "schemaVersion": 48,
   "simulationSetups": [],
   "source": {

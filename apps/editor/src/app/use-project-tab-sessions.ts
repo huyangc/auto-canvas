@@ -29,6 +29,7 @@ import {
   type useDocumentController,
 } from "../document/document-controller";
 import type { createProjectSnapshotSerializer } from "../document/project-snapshot-serializer";
+import { nextUntitledProjectName } from "../document/project-name";
 import {
   browserWorkspaceStore,
   journalProjectWorkspace,
@@ -251,6 +252,7 @@ type AgentProjectResourcesOptions = Parameters<
 interface ProjectTabSessionsOptions {
   openProjectFile: ProjectFileLifecycle["openProjectFile"];
   projectStore: CloudProjectStore | null;
+  cloudProjects: readonly CloudProjectSummary[];
   onCloudProjectSaved(project: CloudProjectSummary): void;
   onCloudProjectsDeleted(projects: readonly CloudProjectSummary[]): void;
   initialProject: CircuitProject | undefined;
@@ -354,6 +356,7 @@ interface ProjectTabSessionsOptions {
 export function useProjectTabSessions({
   openProjectFile,
   projectStore,
+  cloudProjects,
   onCloudProjectSaved,
   onCloudProjectsDeleted,
   initialProject,
@@ -493,10 +496,14 @@ export function useProjectTabSessions({
       unsavedAtSnapshot: session.dirty,
     });
   }
+  const cloudProjectsRef = useRef(cloudProjects);
+  cloudProjectsRef.current = cloudProjects;
+  const cloudProjectNames = () =>
+    cloudProjectsRef.current.map((item) => item.name);
   function createTabSession(
     nextProject = createEmptyProject(
       createId("project"),
-      "New Circuit",
+      nextUntitledProjectName(cloudProjectNames()),
       createId("document"),
     ),
     nextView = DEFAULT_VIEWBOX,
@@ -775,9 +782,22 @@ export function useProjectTabSessions({
     if (!restoredTabs.value || !restoredNewLink.current)
       return restoredTabs.value;
     const id = createId("tab");
+    const blank = createEmptyProject(
+      createId("project"),
+      nextUntitledProjectName([
+        ...restoredTabs.value.tabs.map(
+          ({ session }) => session.controller.project.name,
+        ),
+        ...cloudProjectNames(),
+      ]),
+      createId("document"),
+    );
     return {
       activeId: id,
-      tabs: [...restoredTabs.value.tabs, { id, session: createTabSession() }],
+      tabs: [
+        ...restoredTabs.value.tabs,
+        { id, session: createTabSession(blank) },
+      ],
     };
   });
   // What keeps the editor on this Project now (#1462).
@@ -1226,6 +1246,21 @@ export function useProjectTabSessions({
       outcome,
     );
   }
+  function createNewTabSession(): TabSession {
+    const existingNames = [
+      ...projectTabs
+        .entries()
+        .map(({ session }) => session.controller.project.name),
+      ...cloudProjectNames(),
+    ];
+    return createTabSession(
+      createEmptyProject(
+        createId("project"),
+        nextUntitledProjectName(existingNames),
+        createId("document"),
+      ),
+    );
+  }
   return {
     openImportFile,
     cloudManagementBusy,
@@ -1236,6 +1271,7 @@ export function useProjectTabSessions({
     renameShelfProject,
     deleteShelfProject,
     createTabSession,
+    createNewTabSession,
     restoredTabs,
     /**
      * Whether this window's saved tabs were installed, for the Agent's

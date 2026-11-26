@@ -1767,7 +1767,7 @@ test("the top bar names the project on one row, in both modes", async ({
 }) => {
   await openEditor(page);
   const name = page.locator(".app-project-name");
-  await expect(name).toHaveText("New Circuit");
+  await expect(name).toHaveText("Untitled");
   const long = `${"Folded cascode operational transconductance amplifier ".repeat(2)}test`;
   await renameProject(page, long);
   await expect(name.locator(".app-project-name-text")).toHaveText(long);
@@ -1843,7 +1843,7 @@ test("a long project name gives way before the top bar's controls", async ({
   // A short name is shown whole.
   await page.setViewportSize({ width: 1024, height: 800 });
   await expect(name.locator(".app-project-name-text")).toHaveText(
-    "New Circuit",
+    "Two-Stage Op Amp",
   );
   expect(
     await name

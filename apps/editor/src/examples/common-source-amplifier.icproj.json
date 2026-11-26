@@ -1363,7 +1363,7 @@
   ],
   "externalSubcircuitDefinitions": [],
   "id": "project-main",
-  "name": "New Circuit",
+  "name": "Common-Source Amplifier",
   "schemaVersion": 48,
   "simulationSetups": [],
   "source": {
