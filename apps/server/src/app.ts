@@ -1,3 +1,4 @@
+import { registerAnalytics } from "./user-analytics.js";
 import { registerUsageLog } from "./usage-log.js";
 import { registerAccounts } from "./standalone-accounts.js";
 import { Hono } from "hono";
@@ -50,9 +51,23 @@ export function createApp({
   if (!Number.isSafeInteger(limits.projectLimit) || limits.projectLimit < 1)
     throw new Error("AUTO_CANVAS_PROJECT_LIMIT must be a positive integer");
   const app = new Hono();
-  const registerUsageEndpoint = registerUsageLog(app, auth.mode, log);
+  const { registerUsageEndpoint, recordServerUsage } = registerUsageLog(
+    app,
+    auth.mode,
+    db,
+    log,
+    now,
+  );
   if (relay && auth.mode === "accounts")
-    registerAccounts(app, db, basePath, limits.projectLimit, relay);
+    registerAccounts(
+      app,
+      db,
+      basePath,
+      limits.projectLimit,
+      relay,
+      recordServerUsage,
+      now,
+    );
   else if (relay)
     registerLocal(app, db, basePath, relay, user, limits.projectLimit);
   else if (auth.mode === "notebook")
@@ -207,8 +222,8 @@ function registerNotebook(
     ...identityOptions,
     onProfile: async (profile) => {
       await db.query(
-        "INSERT INTO users(id, display_name) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name",
-        [profile.id, profile.displayName],
+        "INSERT INTO users(id, display_name, last_role) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name, last_role = EXCLUDED.last_role",
+        [profile.id, profile.displayName, profile.isAdmin ? "admin" : "user"],
       );
     },
   });
@@ -285,6 +300,7 @@ function registerNotebook(
     basePath,
     false,
   );
+  registerAnalytics(app, db, "notebook", identityOptions.now);
   registerProjects(app, db, (c) => c.get("sessionUser").id, projectLimit);
   registerGroupLibraries(app, db, {
     notebookApi: identityOptions.notebookApi,

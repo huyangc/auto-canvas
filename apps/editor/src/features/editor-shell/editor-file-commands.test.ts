@@ -45,6 +45,7 @@ function commands(overrides: Partial<EditorFileCommandDependencies> = {}) {
     EditorFileCommandDependencies["beginReplacementCommand"]
   >((intent) => replacementCommand(intent));
   const dependencies = {
+    recordUsage: vi.fn(),
     project,
     document: project.documents[0]!,
     resolver: new InMemorySymbolResolver([]),
@@ -123,6 +124,10 @@ describe.each(["svg", "png"] as const)("%s file delivery", (format) => {
     expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
       artifact.report,
     );
+    expect(target.dependencies.recordUsage).toHaveBeenCalledWith(
+      format === "svg" ? "export.svg" : "export.raster",
+      "ok",
+    );
     expect(target.dependencies.project).toEqual(before);
     expect(target.dependencies.replaceActiveProject).not.toHaveBeenCalled();
   });
@@ -132,6 +137,7 @@ describe.each(["svg", "png"] as const)("%s file delivery", (format) => {
     const target = commands();
     target.deliverFile.mockResolvedValue({ status: "cancelled" });
     await run(target);
+    expect(target.dependencies.recordUsage).not.toHaveBeenCalled();
     expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
       "Export cancelled",
     );
@@ -145,6 +151,10 @@ describe.each(["svg", "png"] as const)("%s file delivery", (format) => {
     const target = commands();
     target.deliverFile.mockRejectedValue(new Error("Disk is full"));
     await run(target);
+    expect(target.dependencies.recordUsage).toHaveBeenCalledWith(
+      format === "svg" ? "export.svg" : "export.raster",
+      "failed",
+    );
     expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
       "Disk is full",
     );
@@ -198,6 +208,14 @@ describe("netlist delivery", () => {
       netlistConfigurationError: "Choose a root Cell",
     });
     await refused.exportDesignNetlist("spice", "native", "file");
+    expect(target.dependencies.recordUsage).toHaveBeenCalledWith(
+      "export.netlist",
+      "ok",
+    );
+    expect(refused.dependencies.recordUsage).toHaveBeenCalledWith(
+      "export.netlist",
+      "failed",
+    );
     expect(refused.deliverFile).not.toHaveBeenCalled();
   });
   it.each(["spice", "spectre"] as const)(

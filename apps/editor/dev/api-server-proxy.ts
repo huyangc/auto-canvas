@@ -10,6 +10,7 @@ export function apiServerProxy(): Plugin {
       const target = process.env.AUTO_CANVAS_API_URL ?? "http://127.0.0.1:4310";
       const proxy = Object.fromEntries(
         [
+          "/api/admin",
           "/api/session",
           "/api/usage",
           "/api/auth",

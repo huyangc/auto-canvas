@@ -1,6 +1,7 @@
 import { useContext, useRef } from "react";
 
 import { useCloudAutoSavePreference } from "../document/cloud-auto-save";
+import { appUrl } from "../lib/app-url";
 import { AccountContext } from "./account-context";
 
 /** Opens the Cloud Projects modal from the signed-in account menu. */
@@ -104,6 +105,19 @@ export function HeaderAccountMenu({
             <div className="command-separator" role="separator" />
           </>
         ) : null}
+        {account?.isAdmin === true && (
+          <a
+            href={appUrl("analytics")}
+            target="_blank"
+            rel="noopener"
+            data-testid="open-analytics"
+            onClick={() => {
+              if (menu.current) menu.current.open = false;
+            }}
+          >
+            User Analytics
+          </a>
+        )}
         {/* Kept in this browser; every web editor with Cloud storage reads it. */}
         <button
           type="button"

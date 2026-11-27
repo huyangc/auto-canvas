@@ -1,6 +1,12 @@
 import { apiUrl } from "../lib/app-url";
 
-type Account = { id: string; displayName: string };
+type Account = {
+  id: string;
+  displayName: string;
+  role?: "user" | "admin";
+  isAdmin?: boolean;
+  mustChangePassword?: boolean;
+};
 type Identity = { mode: "local" } | { mode: "accounts"; user: Account | null };
 export async function identify(): Promise<Identity> {
   let res: Response;

@@ -1,0 +1,178 @@
+.analytics {
+  height: 100dvh;
+  overflow: auto;
+  background: var(--icm-chrome-bg);
+  color: var(--icm-text);
+  padding: clamp(12px, 3vw, 48px);
+  box-sizing: border-box;
+  font:
+    14px/1.5 system-ui,
+    sans-serif;
+}
+.analytics-page {
+  max-width: 1440px;
+  margin: auto;
+}
+.analytics header,
+.analytics-tools,
+.analytics nav,
+.analytics footer,
+.analytics-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--icm-space-3);
+}
+.analytics header {
+  justify-content: space-between;
+}
+.analytics h1,
+.analytics h2,
+.analytics h3,
+.analytics figure {
+  margin: 0;
+}
+.analytics h1 {
+  font-size: clamp(28px, 4vw, 44px);
+  letter-spacing: -0.04em;
+}
+.analytics h2 {
+  font-size: 22px;
+  margin-bottom: 12px;
+}
+.analytics h3,
+.analytics figcaption {
+  font-size: 16px;
+  font-weight: 650;
+}
+.analytics small,
+.analytics-metrics p {
+  color: var(--icm-text-muted);
+}
+.analytics a {
+  color: var(--icm-accent);
+}
+.analytics :is(button, select, input) {
+  background: var(--icm-surface);
+  color: inherit;
+  border: 1px solid var(--icm-border-strong);
+  border-radius: var(--icm-radius-sm);
+  padding: 6px 10px;
+  font: inherit;
+}
+.analytics label {
+  display: grid;
+  font-size: var(--icm-font-sm);
+  gap: 3px;
+}
+.analytics button {
+  cursor: pointer;
+}
+.analytics :disabled {
+  color: var(--icm-text-disabled);
+  cursor: default;
+}
+.analytics button[aria-pressed="true"] {
+  background: var(--icm-text);
+  color: var(--icm-surface);
+}
+.analytics nav {
+  margin: 24px 0;
+  border-bottom: 1px solid var(--icm-border);
+  padding-bottom: 12px;
+}
+.analytics-metrics,
+.analytics-chart-grid {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 275px), 1fr));
+}
+.analytics-chart-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+}
+.analytics :is(article, figure, section, aside) {
+  background: var(--icm-surface);
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-lg);
+  padding: var(--icm-space-4);
+  min-width: 0;
+}
+.analytics article strong {
+  font-size: 24px;
+}
+.analytics :is(section, aside, footer) {
+  margin-top: 12px;
+}
+.analytics section {
+  overflow: auto;
+}
+.analytics-legend {
+  font-size: 12px;
+  margin: 8px 0;
+}
+.analytics-legend i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 4px;
+}
+.analytics figure svg {
+  display: block;
+  width: 100%;
+  fill: var(--icm-text-muted);
+  font-size: 12px;
+}
+.analytics-funnel {
+  display: grid;
+  grid-template-columns: minmax(95px, 1fr) 3fr minmax(70px, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.analytics-funnel svg {
+  height: 10px;
+  background: var(--icm-surface-muted);
+}
+.analytics-badge {
+  display: inline-block;
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-accent-soft);
+  padding: 2px 6px;
+}
+.analytics-scroll {
+  overflow-x: auto;
+}
+.analytics table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.analytics th,
+.analytics td {
+  text-align: left;
+  border-bottom: 1px solid var(--icm-border);
+  padding: 8px;
+}
+.analytics thead {
+  background: var(--icm-surface-muted);
+}
+.analytics fieldset {
+  border: 0;
+  min-width: 190px;
+  padding: 0;
+}
+.analytics fieldset button {
+  margin: 2px;
+  font-size: 12px;
+}
+.analytics fieldset strong,
+.analytics th small {
+  display: block;
+}
+.analytics [role="alert"] {
+  color: var(--icm-error);
+}
+.analytics progress {
+  width: 60px;
+  accent-color: var(--icm-accent);
+}

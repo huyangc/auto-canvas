@@ -147,6 +147,8 @@ export interface AutoLayoutSessionOptions {
   onApplied: (documentIds: readonly string[]) => void;
   /** The planner's verdicts on a run's Cells, as they are settled. */
   onVerdicts?: (verdicts: AutoLayoutCellVerdicts) => void;
+  /** Terminal outcome for telemetry; cancelled, stale, and abandoned runs omit it. */
+  onOutcome?: (outcome: "ok" | "failed") => void;
   now?: () => number;
 }
 
@@ -321,6 +323,7 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
           }
         : null;
     if (error) {
+      options.onOutcome?.("failed");
       options.onVerdicts?.({
         owner: fence.owner,
         projectSessionId: fence.projectSessionId,
@@ -365,7 +368,11 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
         ? report(committed.applied ? "applied" : "unchanged")
         : null,
     });
-    if (!committed.ok) return;
+    if (!committed.ok) {
+      if (committed.error.code !== "STALE_REVISION")
+        options.onOutcome?.("failed");
+      return;
+    }
     if (!committed.applied) {
       options.setStatus(`${AUTO_LAYOUT_UNCHANGED_MESSAGE}${withWarnings}`);
       return;
@@ -376,6 +383,7 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
       cells: [{ documentId: fence.documentId, outcome: "applied" }],
     });
     options.onApplied([fence.documentId]);
+    options.onOutcome?.("ok");
     options.setStatus(
       `Auto Layout applied (revision ${committed.revision})${withWarnings}`,
     );
@@ -513,6 +521,8 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
       }
       // Nothing was committed: only the planner's own refusals stand.
       verdicts([]);
+      if (!refused || refused.ok || refused.error.code !== "STALE_REVISION")
+        options.onOutcome?.("failed");
       const rollback = `Auto Layout could not commit ${failedName} (${code}); nothing was applied`;
       finish(
         prefix(
@@ -535,8 +545,12 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
     });
     const applied = cells.filter((cell) => cell.outcome === "applied");
     verdicts(applied);
-    if (applied.length > 0)
+    if (applied.length > 0) {
       options.onApplied(applied.map((cell) => cell.documentId));
+      options.onOutcome?.("ok");
+    } else if (cells.some((cell) => cell.outcome === "refused")) {
+      options.onOutcome?.("failed");
+    }
     const report: AutoLayoutRunReport = { run: "import", cells };
     const [only] = cells;
     if (single && only) {
@@ -595,6 +609,7 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
           });
           return;
         case "failed":
+          options.onOutcome?.("failed");
           finish(failure(`Auto Layout failed: ${data.message}`));
           return;
         case "result":
@@ -603,7 +618,10 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
               (r) => r.documentId === current.documentId,
             );
             if (planned) apply(current, planned.result);
-            else finish(failure(`Auto Layout failed: ${NO_PLAN_REASON}`));
+            else {
+              options.onOutcome?.("failed");
+              finish(failure(`Auto Layout failed: ${NO_PLAN_REASON}`));
+            }
           } else if (options.liveProject && options.transactStepAtRevisions)
             applyImport(
               current,
@@ -617,6 +635,7 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
     };
     worker.onerror = (event) => {
       if (run?.runId !== runId) return;
+      options.onOutcome?.("failed");
       finish(
         current.kind === "manual"
           ? `Auto Layout could not start: ${event.message || "the planner did not load"}`

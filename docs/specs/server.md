@@ -584,3 +584,28 @@ or manage historical malformed definitions through metadata views.
 [editor client test](../../apps/server/src/component-client.test.ts) use real
 PostgreSQL. The [browser workflow](../../apps/editor/e2e/user-components-server.spec.ts)
 authors, publishes, reloads and places from a fresh browser context.
+
+## Administrator analytics
+
+Accounts and notebook administrators can read the following routes under
+`/api/admin/analytics`. Accounts sessions require the matching
+`X-Canvas-Account` header. Notebook access uses the validated notebook admin
+role. Responses use `Cache-Control: private, no-store`. Local mode has no
+analytics API.
+
+| GET route | Result |
+| --- | --- |
+| `/overview` | User and registration counts, DAU/WAU/MAU, stickiness, hourly activity, D1/D7 retention, asset counts and editor/save funnel. Active sessions count distinct accounts and are null in notebook mode. |
+| `/trends` | Daily new users, DAU, action, save, netlist and export counts, including zero-activity days. |
+| `/features` | Counts by action and category, successful and failed attempts, unique users and automatic/manual mode preference. |
+| `/retention?weeks=8` | Monday-aligned UTC registration cohorts (1–26 weeks), unknown registration count and exact-day D1/D3/D7/D14/D30 retention. Each denominator includes only users old enough to have reached that day. |
+| `/users` | Search by id, display name or username with `q` (up to 100 characters). Filter by `all`, `active7d`, `dormant30d`, `admin` or `disabled`. Sort by `firstSeen`, `lastActive`, `projects`, `actions` or `name`, in `asc` or `desc` order. Defaults to most recently active first. Returns the matching total and a page (offset 0–100000, limit 1–200, default 50). |
+| `/users/:id` | Account summary, daily successful and failed event totals and per-action breakdown. Unknown and cross-mode ids return 404. |
+
+All routes except retention accept `days` (1–365, default 30). Windows include
+the current UTC calendar day. PostgreSQL stores per-user, per-mode daily
+success/failure counts from authenticated editor and server operations.
+Deleting an account preserves historical daily activity and feature totals.
+User listings and asset/funnel counts describe current users. Responses expose
+aggregate activity and account metadata only. Credentials, session tokens,
+project names, drawings and netlist text are private.
