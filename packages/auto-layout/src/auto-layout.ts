@@ -28,6 +28,7 @@ import {
   type FinalistPass,
 } from "./finished-selection.js";
 import { readabilityRegressed } from "./readability.js";
+import { generateCompacted2DCandidates } from "./compact-2d.js";
 import { generateFoldedCandidates, layoutAspectMetrics } from "./pack-rows.js";
 import {
   improvesReadability,
@@ -132,7 +133,7 @@ import {
 } from "./routing-audit.js";
 import { classifyNets, isMos, type NetRoles } from "./net-roles.js";
 import { directedPins } from "./directed-blocks.js";
-import { samePin } from "./pin-contacts.js";
+import { samePin, touchingPins } from "./pin-contacts.js";
 import { placeDocument } from "./place.js";
 import { enforceOrder } from "./polarity-order.js";
 import {
@@ -460,11 +461,23 @@ function planDocument(
                 selected,
                 finish,
               );
+        const folded = foldElongatedFinalist(
+          document,
+          resolver,
+          options,
+          refined,
+          finish,
+        );
+        const compacted =
+          (options.search?.evaluations ??
+            (options.quality === "optimized" ? 1 : 0)) > 0
+            ? compactFinalist2D(document, resolver, options, folded, finish)
+            : folded;
         return routeSelectedFinalist(
           document,
           resolver,
           options,
-          foldElongatedFinalist(document, resolver, options, refined, finish),
+          compacted,
           finish,
         );
       }),
@@ -511,6 +524,35 @@ export function foldElongatedFinalist(
   incumbent: AutoLayoutResult,
   finish: (r: AutoLayoutResult) => AutoLayoutResult,
 ) {
+  return reshapeFinalist("fold", source, resolver, options, incumbent, finish);
+}
+
+/** @internal Compare routed constraint-graph compactions before finalist routing. */
+export function compactFinalist2D(
+  source: SchematicDocument,
+  resolver: SymbolResolver,
+  options: LevelOptions,
+  incumbent: AutoLayoutResult,
+  finish: (r: AutoLayoutResult) => AutoLayoutResult,
+) {
+  return reshapeFinalist(
+    "compact",
+    source,
+    resolver,
+    options,
+    incumbent,
+    finish,
+  );
+}
+
+function reshapeFinalist(
+  mode: "fold" | "compact",
+  source: SchematicDocument,
+  resolver: SymbolResolver,
+  options: LevelOptions,
+  incumbent: AutoLayoutResult,
+  finish: (r: AutoLayoutResult) => AutoLayoutResult,
+) {
   const fallback = incumbent.diagnostics.filter(
     (d) => d.code === "AUTO_LAYOUT_PARTITION_FALLBACK",
   );
@@ -528,29 +570,41 @@ export function foldElongatedFinalist(
   if (
     !final ||
     final.instances.length !== source.instances.length ||
-    final.instances.length < 6
+    final.instances.length < (mode === "fold" ? 6 : 4)
   )
     return incumbent;
   const before = layoutAspectMetrics(final, resolver);
-  if (before.layout.aspectRatio <= 1.85 && before.devices.aspectRatio <= 2.1)
+  if (
+    mode === "fold" &&
+    before.layout.aspectRatio <= 1.85 &&
+    before.devices.aspectRatio <= 2.1
+  )
     return incumbent;
   const roles = classifyNets(final, resolver);
-  const poses = new Map(
-    final.instances.flatMap((i) =>
-      !isMarker(i) && i.placement ? [[i.id, i.placement] as const] : [],
-    ),
-  );
-  const candidates = generateFoldedCandidates(
-    final,
-    resolver,
-    roles,
-    incumbent.groups,
-    poses,
-    resolvedSymmetry(final, resolver, roles).components,
-    stopped,
-    undefined,
-    before,
-  );
+  const candidates =
+    mode === "compact"
+      ? generateCompacted2DCandidates(
+          final,
+          resolver,
+          roles,
+          incumbent.groups,
+          stopped,
+        )
+      : generateFoldedCandidates(
+          final,
+          resolver,
+          roles,
+          incumbent.groups,
+          new Map(
+            final.instances.flatMap((i) =>
+              !isMarker(i) && i.placement ? [[i.id, i.placement] as const] : [],
+            ),
+          ),
+          resolvedSymmetry(final, resolver, roles).components,
+          stopped,
+          undefined,
+          before,
+        );
   if (!candidates.length || stopped()) return incumbent;
   const contacts = contactPolicy(
     source,
@@ -562,6 +616,10 @@ export function foldElongatedFinalist(
   const guards = routedGuards(final, resolver);
   const leads = drawnBodyLeads(final, resolver);
   const score = readabilityTerm(final, resolver);
+  const symmetryViolations =
+    mode === "compact" ? netlistSymmetry(final, resolver).violations : 0;
+  const seatedContacts =
+    mode === "compact" ? touchingPins(final, resolver) : [];
   const passing: { run: LayoutRun; rank: number[] }[] = [];
   for (const devices of candidates) {
     if (stopped()) break;
@@ -580,6 +638,21 @@ export function foldElongatedFinalist(
       contacts,
     );
     if (!trial.final || stopped()) continue;
+    if (mode === "compact") {
+      const trialAudit = auditRouting(trial.final, resolver);
+      if (
+        trialAudit.unsafeProblems.length ||
+        !connectionsIntact(trial.final, resolver) ||
+        trialAudit.crossings > baseline.crossings + 1
+      )
+        continue;
+      if (
+        !source.drafting?.objects.length &&
+        layoutAspectMetrics(trial.final, resolver).layout.area >
+          before.layout.area * 1.05
+      )
+        continue;
+    }
     const faced = finalizeFacing(source, resolver, effective, trial.result);
     const labeled = separateLabels(
       source,
@@ -623,7 +696,8 @@ export function foldElongatedFinalist(
       classifyNets(after, resolver).rails,
     ).violations;
     if (
-      area.devices.elongation >= before.devices.elongation ||
+      (mode === "fold" &&
+        area.devices.elongation >= before.devices.elongation) ||
       afterRail > rail
     )
       continue;
@@ -631,30 +705,43 @@ export function foldElongatedFinalist(
     const noExtraCrossings = audit.crossings <= baseline.crossings;
     if (
       !noExtraCrossings &&
-      !(source.instances.length <= 40 && next < score && next <= score * 0.95)
+      !(
+        mode === "fold" &&
+        source.instances.length <= 40 &&
+        next < score &&
+        next <= score * 0.95
+      )
     )
       continue;
     const squarer = area.layout.elongation <= before.layout.elongation * 0.78;
     const improved =
-      source.instances.length <= 40
-        ? next < score ||
-          (next <= score * 1.02 &&
-            noExtraCrossings &&
-            area.layout.area <= before.layout.area * 1.02 &&
-            squarer) ||
-          (before.layout.aspectRatio >= 3 &&
-            noExtraCrossings &&
-            area.layout.elongation <= 1.65 &&
-            area.layout.area <= before.layout.area * 1.15 &&
-            audit.wireLength <= baseline.wireLength * 1.08 &&
-            next <= score + 3000)
-        : noExtraCrossings &&
-          (area.layout.area < before.layout.area ||
-            (area.layout.area <= before.layout.area * 1.05 &&
-              squarer &&
-              audit.wireLength <= baseline.wireLength * 1.1));
+      mode === "compact"
+        ? source.instances.length <= 40
+          ? next < score && area.layout.area <= before.layout.area
+          : area.layout.area < before.layout.area * 0.98 &&
+            audit.wireLength <= baseline.wireLength * 1.02 &&
+            audit.bends <= baseline.bends * 1.05
+        : source.instances.length <= 40
+          ? next < score ||
+            (next <= score * 1.02 &&
+              noExtraCrossings &&
+              area.layout.area <= before.layout.area * 1.02 &&
+              squarer) ||
+            (before.layout.aspectRatio >= 3 &&
+              noExtraCrossings &&
+              area.layout.elongation <= 1.65 &&
+              area.layout.area <= before.layout.area * 1.15 &&
+              audit.wireLength <= baseline.wireLength * 1.08 &&
+              next <= score + 3000)
+          : noExtraCrossings &&
+            (area.layout.area < before.layout.area ||
+              (area.layout.area <= before.layout.area * 1.05 &&
+                squarer &&
+                audit.wireLength <= baseline.wireLength * 1.1));
     if (
       !improved ||
+      (mode === "compact" &&
+        netlistSymmetry(after, resolver).violations > symmetryViolations) ||
       aprGuardsRegressed(final, after, resolver) ||
       Object.entries(routedGuards(after, resolver)).some(
         ([key, value]) => value > (guards[key] ?? 0),
@@ -666,6 +753,15 @@ export function foldElongatedFinalist(
       keepIntactReroute(source, resolver, incumbent, candidate) !== candidate
     )
       continue;
+    if (seatedContacts.length) {
+      const retained = touchingPins(after, resolver);
+      if (
+        !seatedContacts.every(([a, b]) =>
+          retained.some(([p, q]) => samePin(a, p) && samePin(b, q)),
+        )
+      )
+        continue;
+    }
     passing.push({
       run: { ...trial, result: candidate, final: after },
       rank:
@@ -675,7 +771,7 @@ export function foldElongatedFinalist(
               audit.crossings,
               afterRail,
               area.layout.area,
-              area.layout.elongation,
+              mode === "compact" ? audit.wireLength : area.layout.elongation,
             ],
     });
   }
