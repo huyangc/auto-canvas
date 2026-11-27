@@ -568,11 +568,18 @@ function spatialQuery<T extends { box: Box }>(
   items: T[],
   always?: (item: T) => boolean,
 ) {
+  const isInvalid = (box: Box) =>
+    !Number.isFinite(box.minX) ||
+    !Number.isFinite(box.maxX) ||
+    !Number.isFinite(box.minY) ||
+    !Number.isFinite(box.maxY);
   const entries = items
     .map((item, index) => ({ item, index }))
-    .filter(({ item }) => !always?.(item))
+    .filter(({ item }) => !always?.(item) && !isInvalid(item.box))
     .sort((a, b) => a.item.box.minX - b.item.box.minX);
-  const unconditional = items.flatMap((item, i) => (always?.(item) ? [i] : []));
+  const unconditional = items.flatMap((item, i) =>
+    always?.(item) || isInvalid(item.box) ? [i] : [],
+  );
   let right = -Infinity;
   const prefixRight = entries.map(
     ({ item }) => (right = Math.max(right, item.box.maxX)),
