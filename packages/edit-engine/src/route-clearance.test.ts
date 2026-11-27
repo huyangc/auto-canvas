@@ -574,3 +574,47 @@ it("keeps non-finite custom symbol bounds out of the sorted spatial index", () =
   expect(indexed).toBe(exhaustive);
   expect(indexed).toContain("passes through near");
 });
+
+it("isolates cached snapshot endpoint connections from caller endpoint mutations", () => {
+  const document = createEmptyDocument("endpoint-copy", "Endpoint copy");
+  document.presentation.grid = 10;
+  document.instances.push({
+    id: "r1",
+    symbolId: "resistor",
+    placement: { position: { x: 0, y: 0 }, rotation: 0, mirror: "none" },
+  });
+  freezeSnapshot(document);
+  const context = deriveNetConnectivityContext(document, resolver);
+  const mutableEndpoint = {
+    kind: "terminal" as const,
+    instanceId: "r1",
+    pinName: "1",
+    memberId: "m0",
+  };
+  const pinKey = "terminal:r1:1";
+  const clearance1 = createRouteClearance(document, resolver, context, {
+    logicalIds: new Set(),
+    endpointKeys: new Set([pinKey]),
+  });
+  const start = resolveEndpointConnection(
+    document,
+    resolver,
+    mutableEndpoint,
+    context,
+  )!.gridLanding;
+  const outwardPath = [start, { x: start.x, y: start.y - 40 }];
+  expect(clearance1.conflict(outwardPath, [mutableEndpoint])).toBeNull();
+
+  // Mutating the caller's endpoint object must not poison the shared snapshot cache.
+  mutableEndpoint.instanceId = "other";
+
+  const clearance2 = createRouteClearance(document, resolver, context, {
+    logicalIds: new Set(),
+    endpointKeys: new Set([pinKey]),
+  });
+  expect(
+    clearance2.conflict(outwardPath, [
+      { kind: "terminal", instanceId: "r1", pinName: "1", memberId: "m0" },
+    ]),
+  ).toBeNull();
+});
