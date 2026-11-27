@@ -438,17 +438,30 @@ function planDocument(
               options,
             ),
           );
-        const selected = selectFinalLayout(document, resolver, options);
-        const best = routeSelectedFinalist(
+        const selected = finish(selectFinalLayout(document, resolver, options));
+        const refined =
+          input === "drawing"
+            ? preserveDrawnSymmetry(
+                document,
+                resolver,
+                options,
+                selected,
+                finish,
+              )
+            : refineNetlistPlacement(
+                document,
+                resolver,
+                options,
+                selected,
+                finish,
+              );
+        return routeSelectedFinalist(
           document,
           resolver,
           options,
-          finish(selected),
+          refined,
           finish,
         );
-        return input === "drawing"
-          ? preserveDrawnSymmetry(document, resolver, options, best, finish)
-          : refineNetlistPlacement(document, resolver, options, best, finish);
       }),
     ),
   );
@@ -462,11 +475,22 @@ function routeSelectedFinalist(
   incumbent: AutoLayoutResult,
   finish: (result: AutoLayoutResult) => AutoLayoutResult,
 ): AutoLayoutResult {
+  const fellBackFromPartition = incumbent.diagnostics.some(
+    (d) => d.code === "AUTO_LAYOUT_PARTITION_FALLBACK",
+  );
+  const { partition: _droppedPartition, ...unpartitioned } = options;
+  const effectiveOptions: LevelOptions = fellBackFromPartition
+    ? unpartitioned
+    : options;
   const stopped = () =>
-    !!options.search?.signal?.aborted ||
-    (options.search?.deadline !== undefined &&
-      Date.now() >= options.search.deadline);
-  if (options.partition || options.search?.evaluations === 0 || stopped())
+    !!effectiveOptions.search?.signal?.aborted ||
+    (effectiveOptions.search?.deadline !== undefined &&
+      Date.now() >= effectiveOptions.search.deadline);
+  if (
+    effectiveOptions.partition ||
+    effectiveOptions.search?.evaluations === 0 ||
+    stopped()
+  )
     return incumbent;
   let final = finishedDocument(source, resolver, incumbent);
   if (!final || !auditRouting(final, resolver).crossings) return incumbent;
@@ -475,12 +499,12 @@ function routeSelectedFinalist(
       source,
       resolver,
       followDraftingLabels(source, resolver, result),
-      options,
+      effectiveOptions,
     );
   const negotiated = negotiateFinalist(
     source,
     resolver,
-    options,
+    effectiveOptions,
     incumbent,
     final,
     (result) => finish(finishLabels(result)),
@@ -498,15 +522,32 @@ function routeSelectedFinalist(
     final,
     { deep: true },
   );
+  const acceptFinishedSignals = (candidate: AutoLayoutResult) => {
+    const safeRaw = keepIntactReroute(source, resolver, incumbent, candidate);
+    const finished = finishLabels(safeRaw);
+    const after = finishedDocument(source, resolver, finished);
+    if (!after) return safeRaw;
+    const beforeGuards = routedGuards(final, resolver);
+    const afterGuards = routedGuards(after, resolver);
+    if (
+      !connectionsIntact(after, resolver) ||
+      auditRouting(after, resolver).unsafeProblems.length ||
+      terminalPartition(final, resolver) !==
+        terminalPartition(after, resolver) ||
+      lostNameClaim(final, after) ||
+      readabilityRegressed(final, after, resolver) ||
+      aprGuardsRegressed(final, after, resolver) ||
+      Object.entries(afterGuards).some(
+        ([key, count]) => count > (beforeGuards[key] ?? 0),
+      )
+    )
+      return safeRaw;
+    return keepIntactReroute(source, resolver, incumbent, finished);
+  };
   const signals =
     rawSignals.edits === priorEdits
       ? incumbent
-      : keepIntactReroute(
-          source,
-          resolver,
-          incumbent,
-          finishLabels(rawSignals),
-        );
+      : acceptFinishedSignals(rawSignals);
   const routed = finishedDocument(source, resolver, signals);
   if (
     !routed ||

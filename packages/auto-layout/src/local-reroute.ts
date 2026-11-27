@@ -308,19 +308,23 @@ function rerouteNets(
         // Rank tracks against the retained wires first. A winner still has to
         // pass every guard on the complete transaction replay below.
         const incremental = preview(cleared.document, resolver, routed.edits);
-        const incScore = score(incremental.document);
-        if (
-          incremental.ok &&
-          (rejectRouting(
-            incremental.document,
-            auditRouting(incremental.document, resolver),
-          ) ||
+        if (incremental.ok) {
+          if (
+            rejectRouting(
+              incremental.document,
+              auditRouting(incremental.document, resolver),
+            )
+          )
+            continue;
+          const incScore = score(incremental.document);
+          if (
             incScore >= bestScore ||
             (winner &&
               (!deep || winner.labelClearance === 0) &&
-              incScore >= winner.score))
-        )
-          continue;
+              incScore >= winner.score)
+          )
+            continue;
+        }
       }
       const routedResult = withDraftingTranslation(
         { ...result, edits },
