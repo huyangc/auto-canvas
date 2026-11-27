@@ -41,25 +41,27 @@ export type RouteNetTarget =
 
 /** Object identities in the Document namespace, including Route legs and bends. */
 export function documentObjectIds(document: SchematicDocument): Set<string> {
-  return new Set([
-    ...document.instances.map((o) => o.id),
-    ...document.nets.map((o) => o.id),
-    ...document.routes.map((o) => o.id),
-    ...document.junctions.map((o) => o.id),
-    ...document.annotations.map((o) => o.id),
-    ...document.layoutGroups.map((o) => o.id),
-    ...document.constraints.map((o) => o.id),
-    ...document.connectivityEvidence.map((o) => o.id),
-    ...document.noConnects.map((o) => o.id),
-    ...(document.inductorCouplings ?? []).map((o) => o.id),
-    ...(document.drafting?.objects ?? []).map((o) => o.id),
-    ...document.routes.flatMap((route) =>
-      route.legs.flatMap((leg) => [
-        leg.id,
-        ...(leg.to.kind === "bend" ? [leg.to.bendId] : []),
-      ]),
-    ),
-  ]);
+  const ids = new Set<string>();
+  for (const collection of [
+    document.instances,
+    document.nets,
+    document.routes,
+    document.junctions,
+    document.annotations,
+    document.layoutGroups,
+    document.constraints,
+    document.connectivityEvidence,
+    document.noConnects,
+    document.inductorCouplings ?? [],
+    document.drafting?.objects ?? [],
+  ])
+    for (const object of collection) ids.add(object.id);
+  for (const route of document.routes)
+    for (const leg of route.legs) {
+      ids.add(leg.id);
+      if (leg.to.kind === "bend") ids.add(leg.to.bendId);
+    }
+  return ids;
 }
 
 const MAX_ID_ATTEMPTS = 64;
@@ -497,6 +499,7 @@ function planNetTree(
   const distance = (a: Point, b: Point) =>
     Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
   const joined = new Set<string>();
+  const remaining = new Set(nodes);
   const treeNodes: TreeNode[] = [];
   const segments: Segment[] = [];
   const wires: WireIntent[] = [];
@@ -507,6 +510,8 @@ function planNetTree(
     points: readonly Point[] = [],
   ) => {
     joined.add(component.id);
+    for (const entry of remaining)
+      if (entry.component.id === component.id) remaining.delete(entry);
     treeNodes.push(...component.nodes);
     const keys = new Set(component.nodes.map((node) => node.key));
     for (const route of document.routes) {
@@ -522,22 +527,37 @@ function planNetTree(
   };
   // A wire may not run over a pin it does not join: the pin would sit on
   // the wire without belonging to it.
-  const overOtherPins = (points: readonly Point[], ends: readonly Point[]) =>
-    nodes.some(
-      ({ component, node }) =>
-        !joined.has(component.id) &&
-        !ends.some((end) => same(end, node.point)) &&
-        along(points).some(([from, to]) =>
-          pointOnSegment(node.point, from, to),
-        ),
-    );
+  const overOtherPins = (points: readonly Point[], ends: readonly Point[]) => {
+    for (const { node } of remaining) {
+      if (ends.some((end) => same(end, node.point))) continue;
+      for (let i = 1; i < points.length; i++)
+        if (pointOnSegment(node.point, points[i - 1]!, points[i]!)) return true;
+    }
+    return false;
+  };
+  const paths = new Map<TreeNode, Map<string, ClearPath | string>>();
+  const pathTo = (node: TreeNode, target: RouteEndpoint | Point) => {
+    let targets = paths.get(node);
+    if (!targets) {
+      targets = new Map();
+      paths.set(node, targets);
+    }
+    const key =
+      "kind" in target ? endpointKey(target) : `${target.x},${target.y}`;
+    const cached = targets.get(key);
+    if (cached !== undefined) return cached;
+    const path = clearance.path(node.endpoint, target);
+    targets.set(key, path);
+    return path;
+  };
 
   // The trunk: the longest straight run between two components' pins.
   let trunk: { a: (typeof nodes)[number]; b: (typeof nodes)[number] } | null =
     null;
   let trunkLength = 0;
   for (const [index, a] of nodes.entries())
-    for (const b of nodes.slice(index + 1)) {
+    for (let j = index + 1; j < nodes.length; j++) {
+      const b = nodes[j]!;
       if (a.component.id === b.component.id) continue;
       const [p, q] = [a.node.point, b.node.point];
       if ((p.x !== q.x && p.y !== q.y) || same(p, q)) continue;
@@ -567,21 +587,20 @@ function planNetTree(
       path: ClearPath;
     } | null = null;
     let reason: string | null = null;
-    const pairs = nodes
-      .flatMap((a, index) =>
-        nodes
-          .slice(index + 1)
-          .filter((b) => b.component.id !== a.component.id)
-          .map((b) => ({
-            a,
-            b,
-            estimate: distance(a.node.point, b.node.point),
-          })),
-      )
-      .sort((left, right) => left.estimate - right.estimate)
-      .slice(0, 8);
-    for (const { a, b } of pairs) {
-      const path = clearance.path(a.node.endpoint, b.node.endpoint);
+    const pairs: {
+      a: (typeof nodes)[number];
+      b: (typeof nodes)[number];
+      estimate: number;
+    }[] = [];
+    for (const [index, a] of nodes.entries())
+      for (let j = index + 1; j < nodes.length; j++) {
+        const b = nodes[j]!;
+        if (a.component.id !== b.component.id)
+          pairs.push({ a, b, estimate: distance(a.node.point, b.node.point) });
+      }
+    pairs.sort((left, right) => left.estimate - right.estimate);
+    for (const { a, b } of pairs.slice(0, 8)) {
+      const path = pathTo(a.node, b.node.endpoint);
       if (typeof path === "string") {
         reason ??= path;
         continue;
@@ -614,8 +633,7 @@ function planNetTree(
     } | null = null;
     let reason: string | null = null;
     const reasons = new Map<string, string>();
-    for (const { component, node } of nodes) {
-      if (joined.has(component.id)) continue;
+    for (const { component, node } of remaining) {
       // A joined pin or Junction, or straight onto a drawn wire.
       const targets = [
         ...treeNodes.map((target) => ({
@@ -646,10 +664,7 @@ function planNetTree(
         )
         .slice(0, 4);
       for (const target of targets) {
-        const path = clearance.path(
-          node.endpoint,
-          target.endpoint ?? target.point,
-        );
+        const path = pathTo(node, target.endpoint ?? target.point);
         if (typeof path === "string") {
           reason ??= path;
           if (!reasons.has(component.id)) reasons.set(component.id, path);
