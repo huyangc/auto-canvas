@@ -28,7 +28,11 @@ import {
   type FinalistPass,
 } from "./finished-selection.js";
 import { readabilityRegressed } from "./readability.js";
-import { improvesReadability } from "./readability-selection.js";
+import { generateFoldedCandidates, layoutAspectMetrics } from "./pack-rows.js";
+import {
+  improvesReadability,
+  readabilityTerm,
+} from "./readability-selection.js";
 import { localRailMarkers } from "./local-rail-markers.js";
 import { netlistPresentation } from "./netlist-presentation.js";
 import { planningMemo, reusePlanning } from "./planning-reuse.js";
@@ -460,12 +464,232 @@ function planDocument(
           document,
           resolver,
           options,
-          refined,
+          foldElongatedFinalist(document, resolver, options, refined, finish),
           finish,
         );
       }),
     ),
   );
+}
+
+function carryPartitionDiagnostics(
+  result: AutoLayoutResult,
+  candidate: AutoLayoutResult,
+) {
+  const partitionDiagnostics = result.diagnostics.filter(
+    (d) =>
+      d.rule === "partition" || d.code === "AUTO_LAYOUT_PARTITION_FALLBACK",
+  );
+  if (partitionDiagnostics.length) {
+    const existing = new Set(
+      candidate.diagnostics.map((d) => `${d.code}:${d.message}`),
+    );
+    for (const diagnostic of partitionDiagnostics) {
+      const key = `${diagnostic.code}:${diagnostic.message}`;
+      if (!existing.has(key)) {
+        candidate.diagnostics.push(diagnostic);
+        existing.add(key);
+      }
+    }
+  }
+}
+
+function foldingStopped(options: LevelOptions) {
+  const search = options.search;
+  return (
+    !!options.fixedInstanceIds?.size ||
+    !!search?.signal?.aborted ||
+    (search?.deadline !== undefined && Date.now() >= search.deadline)
+  );
+}
+
+/** @internal Finished placement comparison, before finalist routing. */
+export function foldElongatedFinalist(
+  source: SchematicDocument,
+  resolver: SymbolResolver,
+  options: LevelOptions,
+  incumbent: AutoLayoutResult,
+  finish: (r: AutoLayoutResult) => AutoLayoutResult,
+) {
+  const fallback = incumbent.diagnostics.filter(
+    (d) => d.code === "AUTO_LAYOUT_PARTITION_FALLBACK",
+  );
+  const { partition, ...plain } = options;
+  const effective = fallback.length ? plain : options;
+  const stopped = () => foldingStopped(effective);
+  if (
+    (partition && !fallback.length) ||
+    effective.search?.evaluations === 0 ||
+    stopped() ||
+    [...source.layoutGroups, ...source.constraints].some((g) => g.locked)
+  )
+    return incumbent;
+  const final = finishedDocument(source, resolver, incumbent);
+  if (
+    !final ||
+    final.instances.length !== source.instances.length ||
+    final.instances.length < 6
+  )
+    return incumbent;
+  const before = layoutAspectMetrics(final, resolver);
+  if (before.layout.aspectRatio <= 1.85 && before.devices.aspectRatio <= 2.1)
+    return incumbent;
+  const roles = classifyNets(final, resolver);
+  const poses = new Map(
+    final.instances.flatMap((i) =>
+      !isMarker(i) && i.placement ? [[i.id, i.placement] as const] : [],
+    ),
+  );
+  const candidates = generateFoldedCandidates(
+    final,
+    resolver,
+    roles,
+    incumbent.groups,
+    poses,
+    resolvedSymmetry(final, resolver, roles).components,
+    stopped,
+    undefined,
+    before,
+  );
+  if (!candidates.length || stopped()) return incumbent;
+  const contacts = contactPolicy(
+    source,
+    freezePinGroups(source, resolver),
+    true,
+  );
+  const baseline = auditRouting(final, resolver);
+  const rail = railCrossingMetrics(final, resolver, roles.rails).violations;
+  const guards = routedGuards(final, resolver);
+  const leads = drawnBodyLeads(final, resolver);
+  const score = readabilityTerm(final, resolver);
+  const passing: { run: LayoutRun; rank: number[] }[] = [];
+  for (const devices of candidates) {
+    if (stopped()) break;
+    const trial = planLayoutOnce(
+      source,
+      resolver,
+      effective,
+      emptyOverrides(),
+      refinementMetrics(incumbent)?.strategy,
+      true,
+      devices,
+      undefined,
+      undefined,
+      true,
+      false,
+      contacts,
+    );
+    if (!trial.final || stopped()) continue;
+    const faced = finalizeFacing(source, resolver, effective, trial.result);
+    const labeled = separateLabels(
+      source,
+      resolver,
+      followDraftingLabels(source, resolver, faced),
+      effective,
+    );
+    if (source.drafting?.objects.length) {
+      const base = {
+        ...incumbent,
+        edits: [...incumbent.edits],
+        diagnostics: [...incumbent.diagnostics],
+      };
+      const drafted = followDraftingGroups(
+        source,
+        resolver,
+        base,
+        labeled,
+        draftingGroups(source, resolver),
+      );
+      // Successful joint seating updates the trial. Fallbacks seat the base.
+      if (drafted !== labeled) continue;
+    }
+    const candidate = finish(labeled);
+    const after = finishedDocument(source, resolver, candidate);
+    if (!after) continue;
+    const audit = auditRouting(after, resolver);
+    if (
+      audit.unsafeProblems.length ||
+      !connectionsIntact(after, resolver) ||
+      terminalPartition(final, resolver) !==
+        terminalPartition(after, resolver) ||
+      lostNameClaim(final, after) ||
+      lostDrawnBodyLead(leads, after, resolver)
+    )
+      continue;
+    const area = layoutAspectMetrics(after, resolver);
+    const afterRail = railCrossingMetrics(
+      after,
+      resolver,
+      classifyNets(after, resolver).rails,
+    ).violations;
+    if (
+      area.devices.elongation >= before.devices.elongation ||
+      afterRail > rail
+    )
+      continue;
+    const next = readabilityTerm(after, resolver);
+    const noExtraCrossings = audit.crossings <= baseline.crossings;
+    if (
+      !noExtraCrossings &&
+      !(source.instances.length <= 40 && next < score && next <= score * 0.95)
+    )
+      continue;
+    const squarer = area.layout.elongation <= before.layout.elongation * 0.78;
+    const improved =
+      source.instances.length <= 40
+        ? next < score ||
+          (next <= score * 1.02 &&
+            noExtraCrossings &&
+            area.layout.area <= before.layout.area * 1.02 &&
+            squarer) ||
+          (before.layout.aspectRatio >= 3 &&
+            noExtraCrossings &&
+            area.layout.elongation <= 1.65 &&
+            area.layout.area <= before.layout.area * 1.15 &&
+            audit.wireLength <= baseline.wireLength * 1.08 &&
+            next <= score + 3000)
+        : noExtraCrossings &&
+          (area.layout.area < before.layout.area ||
+            (area.layout.area <= before.layout.area * 1.05 &&
+              squarer &&
+              audit.wireLength <= baseline.wireLength * 1.1));
+    if (
+      !improved ||
+      aprGuardsRegressed(final, after, resolver) ||
+      Object.entries(routedGuards(after, resolver)).some(
+        ([key, value]) => value > (guards[key] ?? 0),
+      ) ||
+      readabilityMetrics(after, resolver, "weighted").unownedDrafting
+        .violations >
+        readabilityMetrics(final, resolver, "weighted").unownedDrafting
+          .violations ||
+      keepIntactReroute(source, resolver, incumbent, candidate) !== candidate
+    )
+      continue;
+    passing.push({
+      run: { ...trial, result: candidate, final: after },
+      rank:
+        source.instances.length <= 40
+          ? [next]
+          : [
+              audit.crossings,
+              afterRail,
+              area.layout.area,
+              area.layout.elongation,
+            ],
+    });
+  }
+  const [best] = passing.sort((a, b) => {
+    for (const [i, value] of a.rank.entries()) {
+      const difference = value - b.rank[i]!;
+      if (difference) return difference;
+    }
+    return 0;
+  });
+  if (!best) return incumbent;
+  carryPartitionDiagnostics(incumbent, best.run.result);
+  retainRefinementMetrics(best.run, incumbent, resolver);
+  return best.run.result;
 }
 
 /** Run the expensive routing alternatives once, after all seat and portfolio trials. */
@@ -685,22 +909,7 @@ function negotiateFinalist(
     keepIntactReroute(source, resolver, result, candidate) !== candidate
   )
     return before;
-  const partitionDiagnostics = result.diagnostics.filter(
-    (d) =>
-      d.rule === "partition" || d.code === "AUTO_LAYOUT_PARTITION_FALLBACK",
-  );
-  if (partitionDiagnostics.length) {
-    const existing = new Set(
-      candidate.diagnostics.map((d) => `${d.code}:${d.message}`),
-    );
-    for (const diagnostic of partitionDiagnostics) {
-      const key = `${diagnostic.code}:${diagnostic.message}`;
-      if (!existing.has(key)) {
-        candidate.diagnostics.push(diagnostic);
-        existing.add(key);
-      }
-    }
-  }
+  carryPartitionDiagnostics(result, candidate);
   retainRefinementMetrics(run, result, resolver);
   return run;
 }
@@ -3531,6 +3740,7 @@ function buildPlan(
     ...planningMemo(document, resolver, "original-net-roles", () =>
       classifyNets(document, resolver),
     ),
+    foldingStopped: () => foldingStopped(options),
     seriesLevels: options.seriesLevels ?? true,
     symmetricHalfOrder: options.symmetricHalfOrder ?? false,
     unsplitSymmetry: options.unsplitSymmetry ?? false,
