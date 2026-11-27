@@ -260,6 +260,10 @@ test("Check and Save keeps its snapshot safe while the drawing is replaced or ed
     page,
     createEmptyProject("project-replacement", "Replacement"),
   );
+  await page
+    .getByRole("dialog", { name: "Unsaved changes" })
+    .getByRole("button", { name: "Continue without saving", exact: true })
+    .click();
   await expect(page.getByTestId("hit-R1")).toHaveCount(0);
   await expect(issues).toHaveText("Not checked");
   releases.shift()!();

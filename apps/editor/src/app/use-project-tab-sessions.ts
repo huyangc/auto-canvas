@@ -24,7 +24,11 @@ import type { AgentCommitOutcome } from "../agent/browser-agent-host";
 import { flushSync } from "react-dom";
 import type { CameraRectInput } from "../canvas/fit-view";
 import type { CameraRuntime } from "../canvas/camera-runtime";
-import { holdAfterFailure, onlineEpoch } from "../document/cloud-auto-save";
+import {
+  CLOUD_AUTO_SAVE_DEADLINE_MS,
+  holdAfterFailure,
+  onlineEpoch,
+} from "../document/cloud-auto-save";
 import { projectFileBaseName } from "../document/project-file-service";
 import {
   EditorDocumentController,
@@ -85,6 +89,49 @@ function sameCloudBinding(
   b: CloudProjectBinding | null,
 ): boolean {
   return a === b || (a?.id === b?.id && a?.revision === b?.revision);
+}
+
+/**
+ * Revalidates every tab targeted by a bulk save-and-close immediately before
+ * removing any tabs: an edit made on one tab while another tab's Cloud save
+ * was in flight must never be discarded silently.
+ */
+export function bulkCloseTargetsStillClean(
+  ids: readonly string[],
+  verifiedSnapshots: ReadonlyMap<string, CircuitProject>,
+  live: {
+    cloudEnabled: boolean;
+    activeId: string;
+    entries: readonly {
+      id: string;
+      session: {
+        controller: { project: CircuitProject };
+        dirty: boolean;
+        unsafe: boolean;
+      };
+    }[];
+    activeDirty: boolean;
+    activeUnsafe: boolean;
+    codeDraftDirty: boolean;
+  },
+): boolean {
+  for (const id of ids) {
+    const entry = live.entries.find((item) => item.id === id);
+    if (!entry) continue;
+    const verified = verifiedSnapshots.get(id);
+    if (
+      verified !== undefined &&
+      !sameProjectContent(entry.session.controller.project, verified)
+    )
+      return false;
+    if (id === live.activeId && live.codeDraftDirty) return false;
+    if (live.cloudEnabled) {
+      if (entry.session.dirty || entry.session.unsafe) return false;
+      if (id === live.activeId && (live.activeDirty || live.activeUnsafe))
+        return false;
+    }
+  }
+  return true;
 }
 
 function formatCloudSaveCloseFailure(outcome: CloudProjectSaveOutcome): string {
@@ -1289,10 +1336,14 @@ export function useProjectTabSessions({
 
   async function saveSingleTabForClose(
     tabId: string,
-  ): Promise<{ ok: true } | { ok: false; message: string }> {
+  ): Promise<
+    | { ok: true; snapshot: CircuitProject | null }
+    | { ok: false; message: string }
+  > {
     const entry = projectTabs.entries().find((item) => item.id === tabId);
-    if (!entry || (!entry.session.dirty && !entry.session.unsafe))
-      return { ok: true };
+    if (!entry) return { ok: true, snapshot: null };
+    if (!entry.session.dirty && !entry.session.unsafe)
+      return { ok: true, snapshot: entry.session.controller.project };
     if (projectStore) {
       if (tabId === projectTabs.currentId()) {
         if (codeDraftDirty)
@@ -1301,7 +1352,9 @@ export function useProjectTabSessions({
             message:
               "Apply or discard your code draft before saving and closing.",
           };
-        const outcome = await saveProjectToCloud();
+        const outcome = await saveProjectToCloud(undefined, false, {
+          deadlineMs: CLOUD_AUTO_SAVE_DEADLINE_MS,
+        });
         if (outcome.status !== "saved")
           return { ok: false, message: formatCloudSaveCloseFailure(outcome) };
         if (tabId === projectTabs.currentId() && isDirtyWork())
@@ -1309,7 +1362,13 @@ export function useProjectTabSessions({
             ok: false,
             message: "New edits arrived while saving; try closing again.",
           };
-        return { ok: true };
+        const currentEntry = projectTabs
+          .entries()
+          .find((item) => item.id === tabId);
+        return {
+          ok: true,
+          snapshot: currentEntry?.session.controller.project ?? null,
+        };
       }
       const startBinding = entry.session.file.cloudBinding;
       const activeBinding = projectTabs
@@ -1343,125 +1402,169 @@ export function useProjectTabSessions({
             );
         const writeSequence = (entry.session.file.cloudWriteSequence ?? 0) + 1;
         entry.session.file.cloudWriteSequence = writeSequence;
+        const ownsWrite = (file: ProjectFileSession) =>
+          file.cloudWriteSequence === writeSequence &&
+          sameCloudBinding(file.cloudBinding, startBinding);
         entry.session.file.persistenceState = "saving";
         projectTabs.changed();
         const epochAtStart = onlineEpoch();
-        let outcome: CloudProjectSaveOutcome;
-        try {
-          outcome = await projectStore.save(candidate, startBinding);
-        } catch (error) {
-          const live = findLive();
-          if (
-            live &&
-            live.session.file.cloudWriteSequence === writeSequence &&
-            sameCloudBinding(live.session.file.cloudBinding, startBinding)
-          ) {
-            live.session.file = {
-              ...live.session.file,
-              persistenceState: "failed",
-              ...(startBinding
-                ? {
-                    autoSaveHold: holdAfterFailure(
-                      live.session.file.autoSaveHold ?? null,
-                      startBinding,
-                      "threw",
-                      epochAtStart,
-                    ),
-                  }
-                : {}),
-            };
-            if (tabId === projectTabs.currentId())
-              restoreFileSession(live.session.file);
-            projectTabs.changed();
-          }
-          return {
-            ok: false,
-            message:
-              error instanceof Error
-                ? error.message
-                : "Could not save to Cloud.",
-          };
-        }
-        const live = findLive();
-        if (!live) return { ok: true };
-        if (
-          live.session.file.cloudWriteSequence !== writeSequence ||
-          !sameCloudBinding(live.session.file.cloudBinding, startBinding)
-        )
-          return {
-            ok: false,
-            message: "A newer Cloud save superseded this save.",
-          };
-        if (outcome.status === "saved") {
-          const stillCurrent =
-            sameProjectContent(live.session.controller.project, candidate) &&
-            (tabId !== projectTabs.currentId() || !codeDraftDirty);
-          const file = live.session.file;
-          live.session.file = {
-            ...file,
-            cloudBinding: {
-              id: outcome.project.id,
-              revision: outcome.project.revision,
-            },
-            savedBaseline: {
-              project: candidate,
-              viewBox: { ...live.session.view },
-            },
-            persistenceState: stillCurrent ? "clean" : "dirty",
-            autoSaveHold: null,
-            autoSaveArmed: !stillCurrent && file.autoSaveArmed === true,
-          };
-          live.session.dirty = !stillCurrent;
-          live.session.unsafe = !stillCurrent;
-          if (tabId === projectTabs.currentId()) {
-            restoreFileSession(live.session.file);
-            stageRecovery(controller.project, {
-              cloudBinding: live.session.file.cloudBinding,
-              unsavedAtSnapshot: !stillCurrent,
-            });
-            void flushRecovery();
-          } else {
-            writeRecoverySessionSnapshot(
-              live.session.recovery,
-              controller.project,
-              {
-                cloudBinding: live.session.file.cloudBinding,
-                unsavedAtSnapshot: !stillCurrent,
-              },
-            );
-          }
-          onCloudProjectSaved(outcome.project);
-          projectTabs.changed();
-          if (!stillCurrent)
+        type CloseSaveStep =
+          | { ok: true; snapshot: CircuitProject | null }
+          | { ok: false; message: string };
+        const finish = async (): Promise<CloseSaveStep> => {
+          let outcome: CloudProjectSaveOutcome;
+          try {
+            outcome = await projectStore.save(candidate, startBinding);
+          } catch (error) {
+            const live = findLive();
+            if (live && ownsWrite(live.session.file)) {
+              live.session.file = {
+                ...live.session.file,
+                persistenceState: "failed",
+                ...(startBinding
+                  ? {
+                      autoSaveHold: holdAfterFailure(
+                        live.session.file.autoSaveHold ?? null,
+                        startBinding,
+                        "threw",
+                        epochAtStart,
+                      ),
+                    }
+                  : {}),
+              };
+              if (tabId === projectTabs.currentId())
+                restoreFileSession(live.session.file);
+              projectTabs.changed();
+            }
             return {
               ok: false,
-              message: "New edits arrived while saving; try closing again.",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Could not save to Cloud.",
             };
-          return { ok: true };
-        }
-        live.session.file = {
-          ...live.session.file,
-          persistenceState:
-            outcome.status === "conflict"
-              ? "conflict"
-              : outcome.status === "unreachable"
-                ? "offline"
-                : "failed",
-          ...(startBinding
-            ? {
-                autoSaveHold: holdAfterFailure(
-                  live.session.file.autoSaveHold ?? null,
-                  startBinding,
-                  outcome,
-                  epochAtStart,
-                ),
-              }
-            : {}),
+          }
+          const live = findLive();
+          if (!live) return { ok: true, snapshot: null };
+          if (!ownsWrite(live.session.file))
+            return {
+              ok: false,
+              message: "A newer Cloud save superseded this save.",
+            };
+          if (outcome.status === "saved") {
+            const stillCurrent =
+              sameProjectContent(live.session.controller.project, candidate) &&
+              (tabId !== projectTabs.currentId() || !codeDraftDirty);
+            const file = live.session.file;
+            live.session.file = {
+              ...file,
+              cloudBinding: {
+                id: outcome.project.id,
+                revision: outcome.project.revision,
+              },
+              savedBaseline: {
+                project: candidate,
+                viewBox: { ...live.session.view },
+              },
+              persistenceState: stillCurrent ? "clean" : "dirty",
+              autoSaveHold: null,
+              autoSaveArmed: !stillCurrent && file.autoSaveArmed === true,
+            };
+            live.session.dirty = !stillCurrent;
+            live.session.unsafe = !stillCurrent;
+            if (tabId === projectTabs.currentId()) {
+              restoreFileSession(live.session.file);
+              stageRecovery(controller.project, {
+                cloudBinding: live.session.file.cloudBinding,
+                unsavedAtSnapshot: !stillCurrent,
+              });
+              void flushRecovery();
+            } else {
+              writeRecoverySessionSnapshot(
+                live.session.recovery,
+                controller.project,
+                {
+                  cloudBinding: live.session.file.cloudBinding,
+                  unsavedAtSnapshot: !stillCurrent,
+                },
+              );
+            }
+            onCloudProjectSaved(outcome.project);
+            projectTabs.changed();
+            if (!stillCurrent)
+              return {
+                ok: false,
+                message: "New edits arrived while saving; try closing again.",
+              };
+            return { ok: true, snapshot: candidate };
+          }
+          live.session.file = {
+            ...live.session.file,
+            persistenceState:
+              outcome.status === "conflict"
+                ? "conflict"
+                : outcome.status === "unreachable"
+                  ? "offline"
+                  : "failed",
+            ...(startBinding
+              ? {
+                  autoSaveHold: holdAfterFailure(
+                    live.session.file.autoSaveHold ?? null,
+                    startBinding,
+                    outcome,
+                    epochAtStart,
+                  ),
+                }
+              : {}),
+          };
+          if (tabId === projectTabs.currentId())
+            restoreFileSession(live.session.file);
+          projectTabs.changed();
+          return { ok: false, message: formatCloudSaveCloseFailure(outcome) };
         };
-        if (tabId === projectTabs.currentId())
-          restoreFileSession(live.session.file);
-        projectTabs.changed();
-        return { ok: false, message: formatCloudSaveCloseFailure(outcome) };
+        // Bound the wait like automatic saves so a stalled Cloud request
+        // releases the tab controls and offers the fallback while late
+        // receipts stay guarded by writeSequence and binding.
+        let settled = false;
+        const finishing = finish().finally(() => {
+          settled = true;
+        });
+        finishing.catch(() => {});
+        let deadline: ReturnType<typeof setTimeout> | undefined;
+        const expired = new Promise<CloseSaveStep>((resolve) => {
+          deadline = setTimeout(() => {
+            const live = findLive();
+            if (!settled && live && ownsWrite(live.session.file)) {
+              live.session.file = {
+                ...live.session.file,
+                persistenceState: "failed",
+                ...(startBinding
+                  ? {
+                      autoSaveHold: holdAfterFailure(
+                        live.session.file.autoSaveHold ?? null,
+                        startBinding,
+                        "timeout",
+                        epochAtStart,
+                      ),
+                    }
+                  : {}),
+              };
+              if (tabId === projectTabs.currentId())
+                restoreFileSession(live.session.file);
+              projectTabs.changed();
+            }
+            resolve({
+              ok: false,
+              message:
+                "The Cloud did not answer in time; the Project may have been saved. Retry, or close without saving.",
+            });
+          }, CLOUD_AUTO_SAVE_DEADLINE_MS);
+        });
+        try {
+          return await Promise.race([finishing, expired]);
+        } finally {
+          clearTimeout(deadline);
+        }
       } finally {
         release();
       }
@@ -1495,8 +1598,12 @@ export function useProjectTabSessions({
         live.session.dirty = false;
         live.session.unsafe = false;
         projectTabs.changed();
+        return { ok: true, snapshot: candidate };
       }
-      return { ok: true };
+      return {
+        ok: false,
+        message: "New edits arrived while exporting; try closing again.",
+      };
     } catch (error) {
       return {
         ok: false,
@@ -1530,12 +1637,42 @@ export function useProjectTabSessions({
     closingSaveInFlight.current = true;
     setClosingSaveBusy(true);
     try {
+      const verifiedSnapshots = new Map<string, CircuitProject>();
       for (const id of ids) {
         const result = await saveSingleTabForClose(id);
         if (!result.ok) {
           setStatus(`Could not save before closing: ${result.message}`);
           return { closed: false, error: result.message };
         }
+        if (result.snapshot) verifiedSnapshots.set(id, result.snapshot);
+      }
+      if (ids.includes(projectTabs.currentId())) {
+        const blocker = projectHoldReason({
+          ...editInProgress(),
+          saving:
+            cloudMutation.current || backgroundCloudSaves.current.size > 0,
+          replaceGuard: !!replaceGuard,
+          recoveryDialogOpen,
+        });
+        if (blocker)
+          return {
+            closed: false,
+            error: `Can't close tab yet: ${blocker}.`,
+          };
+      }
+      if (
+        !bulkCloseTargetsStillClean(ids, verifiedSnapshots, {
+          cloudEnabled: projectStore !== null,
+          activeId: projectTabs.currentId(),
+          entries: projectTabs.entries(),
+          activeDirty: isDirtyWork(),
+          activeUnsafe: hasUnsafeWork(),
+          codeDraftDirty,
+        })
+      ) {
+        const message = "New edits arrived while saving; try closing again.";
+        setStatus(`Could not save before closing: ${message}`);
+        return { closed: false, error: message };
       }
       await projectTabs.closeMany(ids, () => createTabSession());
       const gone = new Set(ids);

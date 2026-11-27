@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps } from "react";
+import { act, StrictMode, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -315,5 +315,82 @@ describe("ProjectTabs", () => {
           ?.textContent,
       ).toContain("Save & close"),
     );
+  });
+
+  it("auto-saves bound dirty tabs first in mixed bulk closes, then prompts only for remaining tabs", async () => {
+    const onSaveAndClose = vi.fn(async () => ({ closed: true }));
+    const onCloseMany = vi.fn();
+    const three = {
+      ...props([
+        tab("a", "Alpha", false),
+        tab("b", "Beta", true, "cloud-b"),
+        tab("c", "Gamma", true, null),
+      ]),
+      onSaveAndClose,
+      onCloseMany,
+    };
+    const view = await mount(three);
+    const firstTab =
+      view.host.querySelector<HTMLButtonElement>('[role="tab"]')!;
+    await act(async () => {
+      firstTab.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          clientX: 10,
+          clientY: 10,
+        }),
+      );
+    });
+    const closeOthers = [
+      ...view.host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    ].find((item) => item.textContent === "Close Others")!;
+    await act(async () => closeOthers.click());
+    // Bound tab "b" is auto-saved and closed first; only unbound tab "c" prompts.
+    expect(onSaveAndClose).toHaveBeenCalledWith(["b"]);
+    const decision = () =>
+      view.host.querySelector<HTMLElement>(
+        '[data-testid="project-tab-close-decision"]',
+      );
+    await vi.waitFor(() =>
+      expect(decision()?.textContent).toContain("Close 1 tab?"),
+    );
+    const discard = [...decision()!.querySelectorAll("button")].find(
+      (item) => item.textContent === "Close without saving",
+    )!;
+    await act(async () => discard.click());
+    expect(onCloseMany).toHaveBeenCalledWith(["c"]);
+  });
+
+  it("recovers cleanly from a failed automatic close under React StrictMode", async () => {
+    const onSaveAndClose = vi.fn(async () => ({
+      closed: false,
+      error: "Cloud timeout",
+    }));
+    const host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    const two = {
+      ...props([tab("a", "Alpha", true, "cloud-a"), tab("b", "Beta")]),
+      onSaveAndClose,
+    };
+    await act(async () =>
+      root!.render(
+        <StrictMode>
+          <ProjectTabs {...two} />
+        </StrictMode>,
+      ),
+    );
+    const closeBtn = host.querySelector<HTMLButtonElement>(
+      '[data-tab-close="a"]',
+    )!;
+    await act(async () => closeBtn.click());
+    const decision = () =>
+      host.querySelector<HTMLElement>(
+        '[data-testid="project-tab-close-decision"]',
+      );
+    await vi.waitFor(() =>
+      expect(decision()?.textContent).toContain("Cloud timeout"),
+    );
+    expect(closeBtn.disabled).toBe(false);
   });
 });
