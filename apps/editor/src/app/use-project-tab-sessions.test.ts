@@ -3,6 +3,8 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it } from "vitest";
 
+import { createEmptyProject } from "@icm/model";
+
 import {
   AccountContext,
   useBeforeAccountLogout,
@@ -11,6 +13,7 @@ import {
 
 import type { ProjectFileSession } from "../document/use-project-file-lifecycle";
 import {
+  bulkCloseTargetsStillClean,
   defaultTabDocks,
   resumedFileSession,
   signingOutCheck,
@@ -156,5 +159,109 @@ describe("signingOutCheck", () => {
     await expect(prepare()).rejects.toThrow("a save is still running");
     expect(signingOut.current).toBe(false);
     await act(async () => root.unmount());
+  });
+});
+
+describe("bulkCloseTargetsStillClean", () => {
+  it("accepts bulk close when every target matches its verified clean snapshot", () => {
+    const a = createEmptyProject("proj-a", "Alpha");
+    const b = createEmptyProject("proj-b", "Beta");
+    expect(
+      bulkCloseTargetsStillClean(
+        ["a", "b"],
+        new Map([
+          ["a", a],
+          ["b", b],
+        ]),
+        {
+          cloudEnabled: true,
+          activeId: "a",
+          entries: [
+            {
+              id: "a",
+              session: {
+                controller: { project: a },
+                dirty: false,
+                unsafe: false,
+              },
+            },
+            {
+              id: "b",
+              session: {
+                controller: { project: b },
+                dirty: false,
+                unsafe: false,
+              },
+            },
+          ],
+          activeDirty: false,
+          activeUnsafe: false,
+          codeDraftDirty: false,
+        },
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses bulk close when the active tab was edited while a background tab saved", () => {
+    const aBefore = createEmptyProject("proj-a", "Alpha");
+    const aAfter = { ...aBefore, name: "Alpha edited", structureRevision: 2 };
+    const b = createEmptyProject("proj-b", "Beta");
+    expect(
+      bulkCloseTargetsStillClean(
+        ["a", "b"],
+        new Map([
+          ["a", aBefore],
+          ["b", b],
+        ]),
+        {
+          cloudEnabled: true,
+          activeId: "a",
+          entries: [
+            {
+              id: "a",
+              session: {
+                controller: { project: aAfter },
+                dirty: true,
+                unsafe: true,
+              },
+            },
+            {
+              id: "b",
+              session: {
+                controller: { project: b },
+                dirty: false,
+                unsafe: false,
+              },
+            },
+          ],
+          activeDirty: true,
+          activeUnsafe: true,
+          codeDraftDirty: false,
+        },
+      ),
+    ).toBe(false);
+  });
+
+  it("refuses bulk close when an unapplied code draft is present on the active tab", () => {
+    const a = createEmptyProject("proj-a", "Alpha");
+    expect(
+      bulkCloseTargetsStillClean(["a"], new Map([["a", a]]), {
+        cloudEnabled: false,
+        activeId: "a",
+        entries: [
+          {
+            id: "a",
+            session: {
+              controller: { project: a },
+              dirty: false,
+              unsafe: false,
+            },
+          },
+        ],
+        activeDirty: false,
+        activeUnsafe: false,
+        codeDraftDirty: true,
+      }),
+    ).toBe(false);
   });
 });

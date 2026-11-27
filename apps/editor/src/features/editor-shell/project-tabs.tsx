@@ -114,12 +114,12 @@ export function ProjectTabs({
   const [savingClose, setSavingClose] = useState(false);
   const savingCloseRef = useRef(false);
   const mountedRef = useRef(true);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
       mountedRef.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
   const effectiveBusy = busy || savingClose;
   const selecting = useRef<{ id: string; promise: Promise<boolean> } | null>(
     null,
@@ -161,6 +161,7 @@ export function ProjectTabs({
   const runAutoSaveClose = async (
     ids: readonly string[],
     onFailure: (message: string) => void,
+    onSuccess?: () => void,
   ) => {
     if (!onSaveAndClose || savingCloseRef.current) return;
     savingCloseRef.current = true;
@@ -172,6 +173,8 @@ export function ProjectTabs({
         onFailure(
           result.error ?? "Could not save to Cloud before closing. Try again.",
         );
+      } else {
+        onSuccess?.();
       }
     } catch (error) {
       if (!mountedRef.current) return;
@@ -243,12 +246,34 @@ export function ProjectTabs({
       onCloseMany(ids);
       return;
     }
-    if (onSaveAndClose && dirtyIds.every(cloudBound)) {
-      void runAutoSaveClose(ids, (message) => {
-        setCloseError(message);
-        setClosing(null);
-        setClosingMany(ids);
-      });
+    const boundDirtyIds = dirtyIds.filter(cloudBound);
+    const unboundDirtyIds = dirtyIds.filter((id) => !cloudBound(id));
+    if (onSaveAndClose && boundDirtyIds.length > 0) {
+      if (unboundDirtyIds.length === 0) {
+        void runAutoSaveClose(ids, (message) => {
+          setCloseError(message);
+          setClosing(null);
+          setClosingMany(ids);
+        });
+        return;
+      }
+      // Mixed bulk close: auto-save and close Cloud-bound dirty tabs first,
+      // then ask only for the remaining tabs that still need a decision.
+      const boundSet = new Set(boundDirtyIds);
+      const remainingIds = ids.filter((id) => !boundSet.has(id));
+      void runAutoSaveClose(
+        boundDirtyIds,
+        (message) => {
+          setCloseError(message);
+          setClosing(null);
+          setClosingMany(ids);
+        },
+        () => {
+          setCloseError(null);
+          setClosing(null);
+          setClosingMany(remainingIds);
+        },
+      );
       return;
     }
     setClosingMany(ids);

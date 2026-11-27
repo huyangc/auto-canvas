@@ -763,6 +763,7 @@ export function useProjectFileLifecycle({
   function saveProjectToCloud(
     candidate?: CircuitProject,
     asNew = false,
+    options?: { deadlineMs?: number },
   ): Promise<CloudProjectSaveOutcome> {
     const blocker = describeCloudSaveBlocker?.();
     if (blocker) {
@@ -802,13 +803,25 @@ export function useProjectFileLifecycle({
             );
           return outcome;
         }
-        return startCloudSave(owner, sessionId, candidate, false);
+        return startCloudSave(
+          owner,
+          sessionId,
+          candidate,
+          false,
+          options?.deadlineMs,
+        );
       };
       return automatic.then(settled, () =>
         settled({ status: "rejected", message: "Save failed" }),
       );
     }
-    return startCloudSave(owner, sessionId, candidate, asNew);
+    return startCloudSave(
+      owner,
+      sessionId,
+      candidate,
+      asNew,
+      options?.deadlineMs,
+    );
   }
 
   function startCloudSave(
@@ -816,6 +829,7 @@ export function useProjectFileLifecycle({
     sessionId: string,
     candidate: CircuitProject | undefined,
     asNew: boolean,
+    deadlineMs?: number,
   ): Promise<CloudProjectSaveOutcome> {
     return trackCloudWrite(
       saveCoordinator.save({
@@ -827,7 +841,33 @@ export function useProjectFileLifecycle({
         ...(candidate ? { candidate } : {}),
         ...(beforeSnapshot ? { beforeSnapshot } : {}),
         asNew,
-        write: (snapshot) => performProjectSaveToCloud(snapshot, asNew),
+        write: (snapshot) => {
+          const writing = performProjectSaveToCloud(snapshot, asNew);
+          if (deadlineMs === undefined) return writing;
+          const binding = asNew ? null : cloudBindingRef.current;
+          const epochAtStart = onlineEpoch();
+          let deadline: ReturnType<typeof setTimeout> | undefined;
+          const expired = new Promise<CloudProjectSaveOutcome>((resolve) => {
+            deadline = setTimeout(() => {
+              if (snapshot.isCurrent()) {
+                setPersistenceState("failed");
+                recordAutoSaveHold(binding, "timeout", epochAtStart);
+                setStatus(
+                  "The Cloud did not answer in time; the Project may have been saved. Retry, or close without saving.",
+                );
+              }
+              resolve({
+                status: "rejected",
+                message:
+                  "The Cloud did not answer in time; the Project may have been saved. Retry, or close without saving.",
+              });
+            }, deadlineMs);
+          });
+          writing.catch(() => {});
+          return Promise.race([writing, expired]).finally(() =>
+            clearTimeout(deadline),
+          );
+        },
         rejected: (reason) => ({
           status: "rejected",
           message:
