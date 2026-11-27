@@ -1,3 +1,4 @@
+import { generateFoldedCandidates, layoutAspectMetrics } from "./pack-rows.js";
 import { reversedSignalHosts } from "./signal-direction.js";
 import { rightedInPlace } from "./directed-blocks.js";
 import { signalSeriesParts } from "./series-levels.js";
@@ -411,7 +412,7 @@ export function placeStages(
   document: SchematicDocument,
   devices: Instance[],
   resolver: SymbolResolver,
-  roles: NetRoles,
+  roles: NetRoles & { foldingStopped?: () => boolean },
   groups: RecognizedGroup[],
   topology = symmetryTopology(document, resolver, roles),
   partition?: LayoutPartition,
@@ -986,6 +987,54 @@ export function placeStages(
       }
     }
     if (changed) best = compose();
+  }
+  const stopped = roles.foldingStopped ?? (() => false);
+  if (
+    !partition &&
+    blocks.length >= 2 &&
+    best.size >= 6 &&
+    !stopped() &&
+    ![...document.layoutGroups, ...document.constraints].some((g) => g.locked)
+  ) {
+    const measured = layoutAspectMetrics(document, resolver, best);
+    const before = measured.devices;
+    if (before.aspectRatio > 2) {
+      const baseScore = estimate(best);
+      const candidates = generateFoldedCandidates(
+        document,
+        resolver,
+        roles,
+        groups,
+        best,
+        symmetry,
+        stopped,
+        { stages: blocks, bridges: bridgeInfo },
+        measured,
+      );
+      for (const candidate of candidates) {
+        if (stopped()) break;
+        const after = layoutAspectMetrics(
+          document,
+          resolver,
+          candidate,
+        ).devices;
+        if (
+          after.elongation > before.elongation * 0.8 ||
+          reversedSignalHosts(document, devices, resolver, roles, candidate)
+        )
+          continue;
+        const next = estimate(candidate);
+        if (
+          (next.score < baseScore.score && after.area <= before.area * 1.2) ||
+          (next.crossings <= baseScore.crossings &&
+            next.length <= baseScore.length * 1.08 &&
+            after.area < before.area)
+        ) {
+          best = candidate;
+          break;
+        }
+      }
+    }
   }
   return { placements: best, ...(twoRows ? { sideRow: sideCandidates } : {}) };
 }
