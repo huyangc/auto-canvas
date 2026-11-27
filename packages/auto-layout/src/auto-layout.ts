@@ -2553,13 +2553,15 @@ function planAutoLayoutMeasured(
       document.instances.length <= 40 &&
       !stopped()
     ) {
-      // Symmetry changes which movements are licensed. Keep each such
-      // polishing context and its drafting origin independent.
+      // Symmetry and finishing budget change which movements are licensed. Keep
+      // each polishing context and its drafting origin independent.
+      const reducedBudget = options.attachmentDraft ?? false;
       const polishKey = JSON.stringify([
         contactResult,
         draftingTranslation(contactResult),
         options.unsplitSymmetry,
         options.mirrorSymmetry,
+        reducedBudget,
       ]);
       const polished = polishedFinalists.get(polishKey);
       if (!searchFinalist && polished) return copyResult(polished);
@@ -2701,7 +2703,6 @@ function planAutoLayoutMeasured(
         cache.set(key, run);
         return run;
       };
-      const reducedBudget = options.attachmentDraft ?? false;
       const relocationBudget = {
         remaining: finishingTrialBudget(
           document.instances.length,
@@ -3656,9 +3657,12 @@ function buildPlan(
   edits.push(...labels);
   if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION)
     return refuse("R73: complete edit list exceeds transaction limit");
-  const final = labels.length
-    ? preview(reanchored.document, resolver, labels)
-    : reanchored;
+  // Replay the complete atomic transaction once after additive claim/label
+  // edits so guards and scoring inspect the exact delivered document.
+  const final =
+    claims.length || anchors.length || labels.length
+      ? preview(document, resolver, edits)
+      : replay;
   if (!final.ok)
     return refuse(
       `R10: final replay rejected: ${JSON.stringify(final.diagnostics)}`,
