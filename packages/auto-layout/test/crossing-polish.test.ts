@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { visibleInstanceBounds } from "@icm/derived";
 import type { SchematicDocument } from "@icm/model";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { planLayoutOnce } from "../src/auto-layout.js";
@@ -7,7 +8,7 @@ import { placement } from "../src/geometry.js";
 import { emptyOverrides } from "../src/layout-choices.js";
 import { classifyNets } from "../src/net-roles.js";
 import { auditRouting } from "../src/routing-audit.js";
-import { stackHolds, stackPairs } from "../src/stack-snap.js";
+import { stackClear, stackHolds, stackPairs } from "../src/stack-snap.js";
 import { terminalPartition } from "../src/transaction.js";
 import type { Placement } from "../src/types.js";
 import { circuit } from "./document-fixture.js";
@@ -188,6 +189,66 @@ describe("finished stack repair", () => {
       repairBrokenStacks(initial, resolver, new Set(["M", "R"]), skipped),
     ).toBe(initial);
     expect(skipped).not.toHaveBeenCalled();
+  });
+
+  it("opens a clear stack gap when a fixed resistor occupies the sideways seat", () => {
+    const doc = circuit(
+      { M: "nmos", R: "resistor", B: "resistor" },
+      { drain: ["M.D", "R.2"] },
+    );
+    const fixed = new Set(["M", "B"]);
+    const { initial, replan } = finish(
+      doc,
+      { M: placement(0, 180), R: placement(90, 0), B: placement(10, 0) },
+      fixed,
+    );
+    const result = repairBrokenStacks(initial, resolver, fixed, replan);
+    const [stack] = stackPairs(
+      doc.instances,
+      resolver,
+      classifyNets(doc, resolver),
+    );
+    const poses = posesOf(result.final!);
+    expect(stackHolds(stack!, poses)).toBe(true);
+    expect(poses.get("B")).toEqual(placement(10, 0));
+    expect(poses.get("R")!.position.y).toBeGreaterThan(0);
+    expect(auditRouting(result.final!, resolver).crossings).toBeLessThanOrEqual(
+      auditRouting(initial.final!, resolver).crossings,
+    );
+  });
+
+  it("repairs a collinear stack obstructed between its pins", () => {
+    const doc = circuit(
+      { M: "nmos", R: "resistor", B: "resistor" },
+      { drain: ["M.D", "R.2"] },
+    );
+    const fixed = new Set(["M", "B"]);
+    const { initial, replan } = finish(
+      doc,
+      {
+        M: placement(-260, 0, "none", 90),
+        R: placement(0, 10, "none", 90),
+        B: placement(-110, 10, "none", 90),
+      },
+      fixed,
+    );
+    const [stack] = stackPairs(
+      doc.instances,
+      resolver,
+      classifyNets(doc, resolver),
+    );
+    const clear = (drawing: SchematicDocument) =>
+      stackClear(
+        stack!,
+        posesOf(drawing),
+        new Map(
+          visibleInstanceBounds(drawing, resolver).map((b) => [b.id, b.bounds]),
+        ),
+      );
+    expect(stackHolds(stack!, posesOf(initial.final!))).toBe(true);
+    expect(clear(initial.final!)).toBe(false);
+    const repaired = repairBrokenStacks(initial, resolver, fixed, replan);
+    expect(clear(repaired.final!)).toBe(true);
   });
 
   it("returns a zero-defect run directly without replanning", () => {
