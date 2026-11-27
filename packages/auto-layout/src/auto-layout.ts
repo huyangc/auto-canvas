@@ -581,36 +581,35 @@ function reshapeFinalist(
   )
     return incumbent;
   const roles = classifyNets(final, resolver);
-  const candidates =
-    mode === "compact"
-      ? generateCompacted2DCandidates(
-          final,
-          resolver,
-          roles,
-          incumbent.groups,
-          stopped,
-        )
-      : generateFoldedCandidates(
-          final,
-          resolver,
-          roles,
-          incumbent.groups,
-          new Map(
-            final.instances.flatMap((i) =>
-              !isMarker(i) && i.placement ? [[i.id, i.placement] as const] : [],
-            ),
+  const sourceContacts = () =>
+    contactPolicy(source, freezePinGroups(source, resolver), true);
+  const compactContacts = mode === "compact" ? sourceContacts() : undefined;
+  const candidates = compactContacts
+    ? generateCompacted2DCandidates(
+        final,
+        resolver,
+        roles,
+        incumbent.groups,
+        stopped,
+        { userLayoutGroups: source.layoutGroups, contacts: compactContacts },
+      )
+    : generateFoldedCandidates(
+        final,
+        resolver,
+        roles,
+        incumbent.groups,
+        new Map(
+          final.instances.flatMap((i) =>
+            !isMarker(i) && i.placement ? [[i.id, i.placement] as const] : [],
           ),
-          resolvedSymmetry(final, resolver, roles).components,
-          stopped,
-          undefined,
-          before,
-        );
+        ),
+        resolvedSymmetry(final, resolver, roles).components,
+        stopped,
+        undefined,
+        before,
+      );
   if (!candidates.length || stopped()) return incumbent;
-  const contacts = contactPolicy(
-    source,
-    freezePinGroups(source, resolver),
-    true,
-  );
+  const contacts = compactContacts ?? sourceContacts();
   const baseline = auditRouting(final, resolver);
   const rail = railCrossingMetrics(final, resolver, roles.rails).violations;
   const guards = routedGuards(final, resolver);
@@ -677,6 +676,7 @@ function reshapeFinalist(
       if (drafted !== labeled) continue;
     }
     const candidate = finish(labeled);
+    if (stopped()) break;
     const after = finishedDocument(source, resolver, candidate);
     if (!after) continue;
     const audit = auditRouting(after, resolver);
@@ -782,7 +782,7 @@ function reshapeFinalist(
     }
     return 0;
   });
-  if (!best) return incumbent;
+  if (!best || stopped()) return incumbent;
   carryPartitionDiagnostics(incumbent, best.run.result);
   retainRefinementMetrics(best.run, incumbent, resolver);
   return best.run.result;
@@ -3923,6 +3923,7 @@ function buildPlan(
           options.localLoopDraft,
           options.attachmentDraft,
           options.gateRowDraft,
+          contacts,
         );
   const translation = exact
     ? inheritedTranslation

@@ -1,5 +1,9 @@
 import { placeAmplifierBetweenBranches } from "./amp-gate-row.js";
 import { seatNodeAttachments } from "./attachment-seat.js";
+import {
+  contactGeometryProblem,
+  type contactPolicy,
+} from "./contact-placement.js";
 import { placeLocalLoopAmplifiers } from "./local-loop-amplifier.js";
 import { planningMemo } from "./planning-reuse.js";
 import { signalSeriesParts } from "./series-levels.js";
@@ -67,6 +71,7 @@ import {
 } from "./symmetry.js";
 import { isMos } from "./net-roles.js";
 import { placeMarkers } from "./place-markers.js";
+import { touchingPins, type PinContact } from "./pin-contacts.js";
 import { alignStacks, draftStrategy, isStackStrategy } from "./stack-snap.js";
 import { solveMctsDraft } from "./mcts-placement.js";
 import { solveConventionDraft } from "./convention-solver.js";
@@ -145,6 +150,8 @@ function resolveCollisions(
   templates: RecognizedGroup[],
   fixed: ReadonlySet<string>,
   symmetry: SymmetryComponent[],
+  placementProblem = geometryProblem,
+  seatedContacts: PinContact[] = [],
 ): string | undefined {
   const ordered = [...document.instances].sort((a, b) =>
     compareIds(a.id, b.id),
@@ -161,6 +168,7 @@ function resolveCollisions(
   };
   const join = (a: string, b: string) => parents.set(root(b), root(a));
   for (const { host, device } of attached) join(host.id, device.id);
+  for (const [a, b] of seatedContacts) join(a.instanceId, b.instanceId);
   for (const group of templates)
     if (group.coupledDotPins)
       for (const id of [
@@ -186,14 +194,14 @@ function resolveCollisions(
         { ...document, instances: [...prior, ...members] },
         targets,
       );
-    const internal = geometryProblem(
+    const internal = placementProblem(
       withPlacements({ ...document, instances: members }, targets),
       resolver,
     );
     if (internal) return internal;
-    let problem = geometryProblem(partial(), resolver);
+    let problem = placementProblem(partial(), resolver);
     const collides = (a: Instance, b: Instance) =>
-      geometryProblem(
+      placementProblem(
         withPlacements({ ...document, instances: [a, b] }, targets),
         resolver,
       );
@@ -220,7 +228,7 @@ function resolveCollisions(
     for (let step = 0; problem && step < 40; step++) {
       for (const i of members)
         targets.get(i.id)!.position[axis] += document.presentation.grid;
-      problem = geometryProblem(partial(), resolver);
+      problem = placementProblem(partial(), resolver);
     }
     if (problem) return problem;
     prior.push(...members);
@@ -249,6 +257,7 @@ export function placeDocument(
   localLoopDraft?: boolean,
   attachmentDraft?: boolean,
   gateRowDraft?: boolean,
+  contacts?: ReturnType<typeof contactPolicy>,
 ): {
   placements: Map<string, Placement>;
   draftingTranslation?: number;
@@ -290,6 +299,7 @@ export function placeDocument(
             localLoopDraft,
             attachmentDraft,
             gateRowDraft,
+            contacts,
           );
           return { result, choices };
         };
@@ -372,6 +382,12 @@ export function placeDocument(
       ),
     };
   const levels = netLevels(devices, resolver, roles);
+  const placementProblem =
+    given && contacts?.allowed.size
+      ? (d: SchematicDocument, r: SymbolResolver) =>
+          contactGeometryProblem(d, r, contacts)
+      : geometryProblem;
+  let seatedContacts: PinContact[] = [];
   if (given) {
     const invalid = [...given].some(([id, p]) => {
       const old = document.instances.find((i) => i.id === id)?.placement;
@@ -399,11 +415,14 @@ export function placeDocument(
       anchorPlacements(document, resolver, supplied, fixed, searchLimit);
     if (anchorProblem) return { placements: targets, problem: anchorProblem };
     targets = new Map(devices.map((i) => [i.id, supplied.get(i.id)!]));
-    const problem = geometryProblem(
-      withPlacements({ ...document, instances: devices }, targets),
-      resolver,
+    const placedCore = withPlacements(
+      { ...document, instances: devices },
+      targets,
     );
+    const problem = placementProblem(placedCore, resolver);
     if (problem) return { placements: targets, problem };
+    if (contacts?.allowed.size)
+      seatedContacts = touchingPins(placedCore, resolver);
   } else if (partition) {
     ({ placements: targets, sideRow } = placeStages(
       document,
@@ -656,6 +675,8 @@ export function placeDocument(
     templates,
     fixed,
     symmetry,
+    placementProblem,
+    seatedContacts,
   );
   if (deviceCollision) return { placements: targets, problem: deviceCollision };
   if (!given)
@@ -696,6 +717,7 @@ export function placeDocument(
       ...symmetryIds,
       ...coupledIds,
       ...oriented,
+      ...seatedContacts.flatMap((pair) => pair.map((pin) => pin.instanceId)),
     ]),
     overrides,
     choices,
@@ -707,6 +729,8 @@ export function placeDocument(
     templates,
     fixed,
     symmetry,
+    placementProblem,
+    seatedContacts,
   );
   if (attachedCollision)
     return { placements: targets, problem: attachedCollision };
@@ -841,6 +865,8 @@ export function placeDocument(
     templates,
     fixed,
     symmetry,
+    placementProblem,
+    seatedContacts,
   );
   if (collision) return { placements: targets, problem: collision };
   const oldBox = searchLimit?.anchor ?? enclosingBox(document, resolver);
@@ -1039,7 +1065,7 @@ export function placeDocument(
   const span =
     searchLimit && spanProblem(document, resolver, targets, searchLimit);
   if (span) return { placements: targets, problem: span };
-  const problem = geometryProblem(result, resolver);
+  const problem = placementProblem(result, resolver);
   if (problem) return { placements: targets, problem };
   return {
     placements: targets,

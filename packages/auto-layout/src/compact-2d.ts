@@ -9,6 +9,10 @@ import {
   type SchematicDocument,
 } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
+import {
+  contactGeometryProblem,
+  type contactPolicy,
+} from "./contact-placement.js";
 import { createPlacementEstimator } from "./estimate.js";
 import {
   cellPinOffset,
@@ -37,6 +41,10 @@ import type { Placement, RecognizedGroup } from "./types.js";
 
 type Axis = "x" | "y";
 type Poses = Map<string, Placement>;
+type CompactionOptions = {
+  userLayoutGroups?: SchematicDocument["layoutGroups"];
+  contacts?: ReturnType<typeof contactPolicy>;
+};
 const other = (axis: Axis) => (axis === "x" ? "y" : "x");
 
 // A physical lead (or conducting-pin alignment) can bind only adjacent devices.
@@ -85,6 +93,7 @@ function compactionGeometry(
   resolver: SymbolResolver,
   roles: NetRoles,
   groups: RecognizedGroup[],
+  userLayoutGroups: SchematicDocument["layoutGroups"],
 ) {
   const devices = document.instances
     .filter((i) => !isMarker(i))
@@ -115,6 +124,7 @@ function compactionGeometry(
     (p) => p.instanceId,
   );
   const pinsByNet = Map.groupBy(pins, (p) => p.net);
+  const pocketDistance = Math.min(cellPinOffset(document), 40);
   for (const { id, bounds } of visibleInstanceBounds(markers, resolver)) {
     const hosts = new Set<string>();
     for (const p of markerPins.get(id) ?? []) {
@@ -126,7 +136,7 @@ function compactionGeometry(
           Math.min(
             boxDistance(bounds, pointBox(q.point)),
             box ? boxDistance(bounds, box) : Infinity,
-          ) <= cellPinOffset(document)
+          ) <= pocketDistance
         )
           hosts.add(q.instanceId);
       }
@@ -190,9 +200,7 @@ function compactionGeometry(
     segments.map((s) => ({ ...s, net: route.netId })),
   );
   const rigid = [
-    ...[...document.layoutGroups, ...document.constraints].map(
-      (g) => g.objectIds,
-    ),
+    ...[...userLayoutGroups, ...document.constraints].map((g) => g.objectIds),
     ...validInductorCouplings(document).map((c) =>
       c.members.map((m) => m.instanceId),
     ),
@@ -214,15 +222,13 @@ function compactionGeometry(
     for (const block of blocks)
       if (nets.every((n) => block.nets.has(n))) rigid.push([block.id, i.id]);
   }
-  for (const net of signalNets.values()) {
-    for (let j = 0; j < net.length; j++) {
-      const a = net[j]!;
-      for (const b of net.slice(j + 1)) {
-        if (
-          a.instanceId !== b.instanceId &&
-          a.point.x === b.point.x &&
-          a.point.y === b.point.y
-        )
+  // Preserve direct contacts on both signal and rail nets.
+  const coincidentPins = Map.groupBy(pins, (p) => `${p.point.x},${p.point.y}`);
+  for (const coincident of coincidentPins.values()) {
+    for (const [j, a] of coincident.entries()) {
+      if (!a.net) continue;
+      for (const b of coincident.slice(j + 1)) {
+        if (a.instanceId !== b.instanceId && a.net === b.net)
           rigid.push([a.instanceId, b.instanceId]);
       }
     }
@@ -546,6 +552,16 @@ function translate(result: Poses, id: string, axis: Axis, delta: number) {
   });
 }
 
+function placementProblem(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  contacts: CompactionOptions["contacts"],
+) {
+  return contacts?.allowed.size
+    ? contactGeometryProblem(document, resolver, contacts)
+    : geometryProblem(document, resolver);
+}
+
 // Each pair has one nonnegative inward displacement. Same-side visibility
 // bounds the outer displacement by the inner displacement plus corridor slack.
 // Opposing halves share the available corridor, including any marker seats.
@@ -555,6 +571,7 @@ function compactSymmetricComponentX(
   input: Poses,
   tier: number,
   stopped: () => boolean,
+  contacts: CompactionOptions["contacts"],
 ) {
   let poses = input;
   for (const c of g.symmetry) {
@@ -596,17 +613,14 @@ function compactSymmetricComponentX(
       }
     }
     const parts = envelopes(g, poses, "x");
-    // Keep each half outside the central routing channel, even between axis devices.
-    const axial = parts.filter((m) => c.axis.includes(m.id));
-    const axisLo =
-      Math.floor(Math.min(center, ...axial.map((m) => m.lo)) / g.grid) * g.grid;
-    const axisHi =
-      Math.ceil(Math.max(center, ...axial.map((m) => m.hi)) / g.grid) * g.grid;
+    // Keep both halves clear of the mirror axis. Visibility handles wider
+    // axis devices only in the row bands they occupy.
+    const centerGap = Math.ceil((tier * g.grid) / 2);
     for (const m of parts) {
       const i = pair.get(m.id);
       if (i === undefined) continue;
-      const clearance = direction(m.id) > 0 ? axisLo - m.hi : m.lo - axisHi;
-      limit[i] = Math.min(limit[i]!, Math.max(0, clearance - tier * g.grid));
+      const clearance = direction(m.id) > 0 ? center - m.hi : m.lo - center;
+      limit[i] = Math.min(limit[i]!, Math.max(0, clearance - centerGap));
     }
     const physical = new Map([...pair.keys()].map((id, j) => [id, j]));
     visibility(g, parts, "x", tier, physical, (a, b, dist) => {
@@ -647,7 +661,7 @@ function compactSymmetricComponentX(
     if (span(true) >= span(false)) continue;
     const result = new Map(poses);
     for (const [id, dx] of shifts) translate(result, id, "x", dx);
-    if (!geometryProblem(withPlacements(g.core, result), resolver))
+    if (!placementProblem(withPlacements(g.core, result), resolver, contacts))
       poses = result;
   }
   return poses;
@@ -660,10 +674,11 @@ function compactAxis2D(
   axis: Axis,
   tier: number,
   stopped: () => boolean,
+  contacts: CompactionOptions["contacts"],
 ): Poses | undefined {
   const poses =
     axis === "x"
-      ? compactSymmetricComponentX(g, resolver, input, tier, stopped)
+      ? compactSymmetricComponentX(g, resolver, input, tier, stopped, contacts)
       : input;
   if (stopped()) return;
   const units = g.units[axis],
@@ -781,7 +796,8 @@ function compactAxis2D(
   const result = new Map(poses);
   for (const [id, i] of condensed)
     translate(result, id, axis, nodes[i]!.position);
-  if (!geometryProblem(withPlacements(g.core, result), resolver)) return result;
+  if (!placementProblem(withPlacements(g.core, result), resolver, contacts))
+    return result;
 }
 
 // Candidate poses are translations, so measuring the cached visible bounds
@@ -817,11 +833,22 @@ export function generateCompacted2DCandidates(
   roles: NetRoles,
   groups: RecognizedGroup[],
   stopped: () => boolean,
+  options?: CompactionOptions,
 ) {
   const devices = document.instances.filter((i) => !isMarker(i));
   if (stopped() || devices.length < 2 || devices.some((i) => !i.placement))
     return [];
-  const g = compactionGeometry(document, resolver, roles, groups);
+  const emittedGroupIds = new Set(groups.map((g) => g.id));
+  const userLayoutGroups =
+    options?.userLayoutGroups ??
+    document.layoutGroups.filter((g) => !emittedGroupIds.has(g.id));
+  const g = compactionGeometry(
+    document,
+    resolver,
+    roles,
+    groups,
+    userLayoutGroups,
+  );
   if (!g.boxes.size) return [];
   const poses = new Map(g.core.instances.map((i) => [i.id, i.placement!]));
   const before = deviceMetrics(g, poses);
@@ -843,7 +870,7 @@ export function generateCompacted2DCandidates(
   }
   const solve = (p: Poses | undefined, axis: Axis, tier: number) =>
     p && !stopped()
-      ? compactAxis2D(g, resolver, p, axis, tier, stopped)
+      ? compactAxis2D(g, resolver, p, axis, tier, stopped, options?.contacts)
       : undefined;
   const x = solve(poses, "x", 2),
     y = solve(poses, "y", 2);

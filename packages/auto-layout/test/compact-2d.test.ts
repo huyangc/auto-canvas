@@ -1,4 +1,5 @@
 import { expect, it, vi } from "vitest";
+import { visibleInstanceBounds } from "@icm/derived";
 import { createRoutePath, type SchematicDocument } from "@icm/model";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import {
@@ -8,6 +9,10 @@ import {
 } from "../src/auto-layout.js";
 import { compactPlacements, compactRows } from "../src/compact.js";
 import { generateCompacted2DCandidates } from "../src/compact-2d.js";
+import {
+  contactGeometryProblem,
+  contactPolicy,
+} from "../src/contact-placement.js";
 import * as drafting from "../src/follow-drafting-groups.js";
 import {
   geometryProblem,
@@ -18,6 +23,7 @@ import {
 import { emptyOverrides } from "../src/layout-choices.js";
 import { classifyNets } from "../src/net-roles.js";
 import { layoutAspectMetrics } from "../src/pack-rows.js";
+import { touchingPins } from "../src/pin-contacts.js";
 import { netlistSymmetry } from "../src/readability-netlist-symmetry.js";
 import { readabilityTerm } from "../src/readability-selection.js";
 import { recognizeStructures } from "../src/recognize.js";
@@ -122,8 +128,62 @@ function differentialStage() {
   );
 }
 
+function replayPlaced(
+  d: SchematicDocument,
+  contacts?: ReturnType<typeof contactPolicy>,
+) {
+  const poses = new Map(d.instances.map((i) => [i.id, i.placement!]));
+  const run = planLayoutOnce(
+    d,
+    resolver,
+    {},
+    emptyOverrides(),
+    "template",
+    true,
+    undefined,
+    undefined,
+    poses,
+    false,
+    false,
+    contacts,
+  );
+  if (!run.final) throw Error(JSON.stringify(run.result.diagnostics));
+  return { ...run, final: run.final };
+}
+
+function looseDifferentialStage() {
+  const d = differentialStage();
+  const coords = [
+    [-250, 200],
+    [250, 200],
+    [-240, 0],
+    [240, 0],
+    [0, 430],
+    [610, 200],
+  ] as const;
+  for (const [j, i] of d.instances.entries())
+    i.placement = placement(
+      coords[j]![0],
+      coords[j]![1],
+      j === 1 ? "horizontal" : "none",
+    );
+  return d;
+}
+
+function pairSpans(d: SchematicDocument) {
+  const x = (id: string) =>
+    d.instances.find((i) => i.id === id)!.placement!.position.x;
+  return [x("b") - x("a"), x("r") - x("l")];
+}
+
 it("compresses a differential stage vertically while preserving its mirror axis and row pairs", () => {
   const d = differentialStage();
+  d.layoutGroups.push({
+    id: "user-pair",
+    kind: "custom",
+    objectIds: ["a", "b"],
+    locked: false,
+  });
   const coords = [
     [0, 200],
     [120, 200],
@@ -321,21 +381,7 @@ it.each([4, 21])(
 );
 
 it("moves both sides of a loose multi-pair stage inward around its tail", () => {
-  const d = differentialStage();
-  const coords = [
-    [-250, 200],
-    [250, 200],
-    [-240, 0],
-    [240, 0],
-    [0, 430],
-    [610, 200],
-  ];
-  for (const [j, i] of d.instances.entries())
-    i.placement = placement(
-      coords[j]![0]!,
-      coords[j]![1]!,
-      j === 1 ? "horizontal" : "none",
-    );
+  const d = looseDifferentialStage();
   const result = candidates(d).find(
     (p) => p.get("b")!.position.x - p.get("a")!.position.x < 500,
   );
@@ -353,6 +399,175 @@ it("moves both sides of a loose multi-pair stage inward around its tail", () => 
     netlistSymmetry(withPlacements(d, result!), resolver).violations,
   ).toBeLessThanOrEqual(netlistSymmetry(d, resolver).violations);
 });
+
+it("compacts both symmetric pairs after replay emits a layout group", () => {
+  const d = looseDifferentialStage();
+  const { final, result } = replayPlaced(d);
+  expect(final.layoutGroups).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        objectIds: expect.arrayContaining(["a", "b"]),
+      }),
+    ]),
+  );
+  const before = pairSpans(final);
+  const contracts = (layout: SchematicDocument) =>
+    pairSpans(layout).every((span, index) => span < before[index]!);
+  const roles = classifyNets(final, resolver);
+  const proposals = generateCompacted2DCandidates(
+    final,
+    resolver,
+    roles,
+    result.groups,
+    () => false,
+  );
+  expect(
+    proposals.some((poses) => contracts(withPlacements(final, poses))),
+  ).toBe(true);
+  const rigid = generateCompacted2DCandidates(
+    final,
+    resolver,
+    roles,
+    result.groups,
+    () => false,
+    {
+      userLayoutGroups: final.layoutGroups,
+    },
+  );
+  for (const poses of rigid)
+    expect(pairSpans(withPlacements(final, poses))[0]).toEqual(before[0]);
+
+  const best = compactFinalist2D(d, resolver, {}, result, identity);
+  const after = preview(d, resolver, best.edits);
+  if (!after.ok) throw Error("Invalid symmetric compaction");
+  expect(contracts(after.document)).toBe(true);
+  expect(
+    netlistSymmetry(after.document, resolver).violations,
+  ).toBeLessThanOrEqual(netlistSymmetry(final, resolver).violations);
+}, 30000);
+
+it("uses the wide axis device's clearance only in its own row", () => {
+  const d = looseDifferentialStage();
+  d.instances.find((i) => i.id === "tail")!.placement = placement(0, 200);
+  d.instances.find((i) => i.id === "l")!.placement = placement(-220, 0);
+  d.instances.find((i) => i.id === "r")!.placement = placement(220, 0);
+  const source = resolver.resolve("current-source")!.definition;
+  const wide = new InMemorySymbolResolver(
+    [
+      {
+        ...source,
+        viewBox: { ...source.viewBox, x: -110, width: 220 },
+        primitives: [
+          ...source.primitives,
+          {
+            kind: "line",
+            from: { x: -100, y: 0 },
+            to: { x: 100, y: 0 },
+            style: { strokeRole: "normal", lineCap: "butt", lineJoin: "miter" },
+          },
+        ],
+      },
+    ],
+    resolver,
+  );
+  const roles = classifyNets(d, wide);
+  const proposals = generateCompacted2DCandidates(
+    d,
+    wide,
+    roles,
+    recognizeStructures(d, roles),
+    () => false,
+  );
+  const compact = proposals
+    .map((poses) => withPlacements(d, poses))
+    .find((layout) => {
+      const [sameRow, otherRow] = pairSpans(layout);
+      return sameRow! < 500 && otherRow! < 200;
+    });
+  expect(compact).toBeDefined();
+  const bounds = new Map(
+    visibleInstanceBounds(compact!, wide).map(({ id, bounds }) => [id, bounds]),
+  );
+  const tail = bounds.get("tail")!;
+  const gap = 2 * d.presentation.grid;
+  expect(
+    tail.x - (bounds.get("a")!.x + bounds.get("a")!.width),
+  ).toBeGreaterThanOrEqual(gap);
+  expect(bounds.get("b")!.x - (tail.x + tail.width)).toBeGreaterThanOrEqual(
+    gap,
+  );
+  expect(bounds.get("l")!.x).toBeGreaterThan(tail.x);
+  expect(bounds.get("r")!.x + bounds.get("r")!.width).toBeLessThan(
+    tail.x + tail.width,
+  );
+  expect(geometryProblem(compact!, wide)).toBeUndefined();
+});
+
+it("promotes a smaller routed layout while keeping a licensed direct contact", () => {
+  const d = rows(2, 300, 160);
+  d.instances[1]!.placement = placement(40, 0, "none", 270);
+  const seats = touchingPins(d, resolver);
+  expect(seats).toHaveLength(1);
+  const contacts = contactPolicy(d, routing.freezePinGroups(d, resolver));
+  const { final, result } = replayPlaced(d, contacts);
+  const roles = classifyNets(final, resolver);
+  const proposals = generateCompacted2DCandidates(
+    final,
+    resolver,
+    roles,
+    result.groups,
+    () => false,
+    { contacts },
+  );
+  expect(proposals.length).toBeGreaterThan(0);
+  expect(
+    generateCompacted2DCandidates(
+      final,
+      resolver,
+      roles,
+      result.groups,
+      () => false,
+    ),
+  ).toEqual([]);
+  for (const poses of proposals) {
+    const compact = withPlacements(final, poses);
+    expect(touchingPins(compact, resolver)).toEqual(seats);
+    expect(contactGeometryProblem(compact, resolver, contacts)).toBeUndefined();
+  }
+
+  const best = compactFinalist2D(d, resolver, {}, result, identity);
+  const after = preview(d, resolver, best.edits);
+  if (!after.ok) throw Error("Invalid direct-contact compaction");
+  expect(
+    layoutAspectMetrics(after.document, resolver).layout.area,
+  ).toBeLessThan(layoutAspectMetrics(final, resolver).layout.area);
+  expect(touchingPins(after.document, resolver)).toEqual(seats);
+  expect(connectionsIntact(after.document, resolver)).toBe(true);
+}, 30000);
+
+it("keeps the incumbent when the deadline expires inside finish", () => {
+  const d = rows(4, 200, 80);
+  const { result } = replayPlaced(d);
+  const original = structuredClone(result);
+  const clock = vi.spyOn(Date, "now").mockReturnValue(0);
+  const search = { seed: 1, evaluations: 1, deadline: 1000 };
+  try {
+    expect(
+      compactFinalist2D(d, resolver, { search }, result, identity),
+    ).not.toBe(result);
+    const finish = vi.fn((candidate: AutoLayoutResult) => {
+      clock.mockReturnValue(search.deadline);
+      return candidate;
+    });
+    expect(compactFinalist2D(d, resolver, { search }, result, finish)).toBe(
+      result,
+    );
+    expect(finish).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(original);
+  } finally {
+    clock.mockRestore();
+  }
+}, 30000);
 
 it("reserves a seated ground marker's clearance below its host", () => {
   const d = circuit(
