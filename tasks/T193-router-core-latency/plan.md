@@ -95,15 +95,14 @@ Run from the repository root; all must pass.
 pnpm build
 pnpm typecheck
 pnpm lint
-pnpm format --check
-pnpm check-markdown-links
-pnpm --filter @icm/edit-engine test
-pnpm --filter @icm/auto-layout test
+pnpm format:check
+pnpm docs:check
+pnpm exec vitest run packages/edit-engine packages/auto-layout
 ```
 
 Performance & exactness checks (run by Task Lead after implementation):
 
-- Bit-exact (`planHash` + `dr = 0.0000`) verification on the 9 heaviest/key Gallery schematics (`9r4prxnen5`, `sm663cbs8b`, `2rmm2vb45f`, `r462vjaatg`, `q9hvr9f7yj`, `3kdhdapd4a`, `ycg43babwa`, `bsvsx7bmns`, `p7mrh78gjj`) against `origin/main` (`e933dde6`), with measurable wall-clock reduction on both `planRouteNet` hotspots and `pnpm --filter @icm/auto-layout test:slow`.
+- Bit-exact (`planHash` + `dr = 0.0000`) verification on the 9 heaviest/key Gallery schematics (`9r4prxnen5`, `sm663cbs8b`, `2rmm2vb45f`, `r462vjaatg`, `q9hvr9f7yj`, `3kdhdapd4a`, `ycg43babwa`, `bsvsx7bmns`, `p7mrh78gjj`) against `origin/main` (`e933dde6`), with measurable wall-clock reduction on both `planRouteNet` hotspots and `pnpm test:slow`.
 
 ## Notes for the implementer
 

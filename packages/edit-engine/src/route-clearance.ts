@@ -381,9 +381,15 @@ function buildGeometry(
     const key = endpointKey(endpoint);
     let connection = connections.get(key);
     if (!connection) {
+      // Copy caller-owned endpoint objects so later mutations cannot poison
+      // the shared frozen-snapshot connection cache.
       connection =
-        resolveEndpointConnection(document, resolver, endpoint, context) ??
-        undefined;
+        resolveEndpointConnection(
+          document,
+          resolver,
+          { ...endpoint },
+          context,
+        ) ?? undefined;
       if (connection) connections.set(key, connection);
     }
     return connection;
