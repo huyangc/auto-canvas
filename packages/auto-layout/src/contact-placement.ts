@@ -93,7 +93,7 @@ export function contactGeometryProblem(
 ) {
   const hits = new Map<string, ReturnType<typeof pinPoints>>();
   for (const p of pinPoints(d, r)) {
-    const k = JSON.stringify(p.point),
+    const k = `${p.point.x},${p.point.y}`,
       arr = hits.get(k) ?? [];
     arr.push(p);
     hits.set(k, arr);
@@ -152,17 +152,20 @@ export function contactGeometryProblem(
     }
     permitted.add(pairKey(a.instanceId, b.instanceId));
   }
-  for (const [i, a] of boxes.entries())
-    for (const b of boxes.slice(i + 1)) {
+  for (let i = 0; i < boxes.length; i++) {
+    const a = boxes[i]!;
+    for (let j = i + 1; j < boxes.length; j++) {
+      const b = boxes[j]!;
       if (
-        !permitted.has(pairKey(a.id, b.id)) &&
         a.bounds.x < b.bounds.x + b.bounds.width &&
         b.bounds.x < a.bounds.x + a.bounds.width &&
         a.bounds.y < b.bounds.y + b.bounds.height &&
-        b.bounds.y < a.bounds.y + a.bounds.height
+        b.bounds.y < a.bounds.y + a.bounds.height &&
+        (permitted.size === 0 || !permitted.has(pairKey(a.id, b.id)))
       )
         return "R10: bounds overlap " + a.id + ", " + b.id;
     }
+  }
 }
 
 /** Close only an axial strip between facing terminals. Everything on its far

@@ -601,9 +601,7 @@ export function recoverDraftingOwners(
 ): AutoLayoutResult {
   if (stopped()) return base;
   if (base.diagnostics.some((d) => d.severity === "error")) return base;
-  // The caller applies R150's plain, nonzero-budget, small-document gate.
-  const groups =
-    source.instances.length <= 40 ? draftingGroups(source, resolver) : [];
+  const groups = draftingGroups(source, resolver);
   const hasFreeWire = source.routes.some((r) =>
     source.nets.some((n) => n.id === r.netId && !n.terminals.length),
   );

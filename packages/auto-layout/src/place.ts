@@ -704,6 +704,7 @@ export function placeDocument(
     overrides,
     emptyChoices(),
     fixed,
+    placementProblem,
   );
   orientByWireCost(
     document,
@@ -853,7 +854,16 @@ export function placeDocument(
       // A candidate that cannot be built is not offered (R63).
       return { placements: targets, problem: "R166: stack alignment failed" };
     }
-  placeMarkers(document, resolver, roles, targets, overrides, choices, fixed);
+  placeMarkers(
+    document,
+    resolver,
+    roles,
+    targets,
+    overrides,
+    choices,
+    fixed,
+    placementProblem,
+  );
   for (const id of fixed) {
     const old = document.instances.find((i) => i.id === id)?.placement;
     if (old) targets.set(id, structuredClone(old));

@@ -14,6 +14,15 @@ export function readabilityTerm(
   resolver: SymbolResolver,
 ): number {
   if (document.instances.length > 40 || !READABILITY_SELECTION_WEIGHT) return 0;
+  return unboundedReadabilityTerm(document, resolver);
+}
+
+/** Calibrated score for routed 2D reshaping at any circuit size. */
+export function unboundedReadabilityTerm(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+): number {
+  if (!READABILITY_SELECTION_WEIGHT) return 0;
   return (
     READABILITY_SELECTION_WEIGHT *
     planningMemo(document, resolver, "selection-readability", () =>

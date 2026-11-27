@@ -27,8 +27,10 @@ import { touchingPins } from "../src/pin-contacts.js";
 import { netlistSymmetry } from "../src/readability-netlist-symmetry.js";
 import { readabilityTerm } from "../src/readability-selection.js";
 import { recognizeStructures } from "../src/recognize.js";
+import * as refinement from "../src/refine.js";
 import * as routing from "../src/route.js";
 import { auditRouting } from "../src/routing-audit.js";
+import * as transaction from "../src/transaction.js";
 import { preview, terminalPartition } from "../src/transaction.js";
 import type { AutoLayoutOptions, AutoLayoutResult } from "../src/types.js";
 import { circuit } from "./document-fixture.js";
@@ -424,19 +426,6 @@ it("compacts both symmetric pairs after replay emits a layout group", () => {
   expect(
     proposals.some((poses) => contracts(withPlacements(final, poses))),
   ).toBe(true);
-  const rigid = generateCompacted2DCandidates(
-    final,
-    resolver,
-    roles,
-    result.groups,
-    () => false,
-    {
-      userLayoutGroups: final.layoutGroups,
-    },
-  );
-  for (const poses of rigid)
-    expect(pairSpans(withPlacements(final, poses))[0]).toEqual(before[0]);
-
   const best = compactFinalist2D(d, resolver, {}, result, identity);
   const after = preview(d, resolver, best.edits);
   if (!after.ok) throw Error("Invalid symmetric compaction");
@@ -444,6 +433,46 @@ it("compacts both symmetric pairs after replay emits a layout group", () => {
   expect(
     netlistSymmetry(after.document, resolver).violations,
   ).toBeLessThanOrEqual(netlistSymmetry(final, resolver).violations);
+}, 30000);
+
+it("keeps an authored group rigid while compacting outside it after replay", () => {
+  const d = looseDifferentialStage();
+  d.instances.push({
+    id: "extra",
+    symbolId: "resistor",
+    placement: placement(610, 400),
+  });
+  const group = {
+    id: "user-pair",
+    kind: "custom" as const,
+    objectIds: ["side", "extra"],
+    locked: false,
+  };
+  d.layoutGroups.push(group);
+  const { final, result } = replayPlaced(d);
+  expect(final.layoutGroups).toContainEqual(group);
+  expect(final.layoutGroups.some((g) => g.id !== group.id)).toBe(true);
+  const proposals = generateCompacted2DCandidates(
+    final,
+    resolver,
+    classifyNets(final, resolver),
+    result.groups,
+    () => false,
+    { userLayoutGroups: d.layoutGroups },
+  );
+  expect(proposals.length).toBeGreaterThan(0);
+  const offset = (layout: SchematicDocument) => {
+    const a = layout.instances.find((i) => i.id === "side")!.placement!;
+    const b = layout.instances.find((i) => i.id === "extra")!.placement!;
+    return { x: b.position.x - a.position.x, y: b.position.y - a.position.y };
+  };
+  for (const poses of proposals) {
+    const compact = withPlacements(final, poses);
+    expect(offset(compact)).toEqual(offset(final));
+    expect(layoutAspectMetrics(compact, resolver).devices.area).toBeLessThan(
+      layoutAspectMetrics(final, resolver).devices.area,
+    );
+  }
 }, 30000);
 
 it("uses the wide axis device's clearance only in its own row", () => {
@@ -545,17 +574,88 @@ it("promotes a smaller routed layout while keeping a licensed direct contact", (
   expect(connectionsIntact(after.document, resolver)).toBe(true);
 }, 30000);
 
+it("keeps duplicate grounds near their host while replaying and compacting a licensed contact", () => {
+  const d = rows(2, 300, 160);
+  d.instances[1]!.placement = placement(40, 0, "none", 270);
+  d.instances.push(
+    { id: "ground-a", symbolId: "ground", placement: placement(60, 40) },
+    { id: "ground-b", symbolId: "ground", placement: placement(90, 40) },
+  );
+  d.nets.push({
+    id: "ground",
+    terminals: [
+      { instanceId: "0-1", pinName: "2" },
+      { instanceId: "ground-a", pinName: "0" },
+      { instanceId: "ground-b", pinName: "0" },
+    ],
+  });
+  const contacts = contactPolicy(d, routing.freezePinGroups(d, resolver));
+  const seats = touchingPins(d, resolver);
+  expect(seats).toHaveLength(1);
+  const { final, result } = replayPlaced(d, contacts);
+  const best = compactFinalist2D(d, resolver, {}, result, identity);
+  expect(best).not.toBe(result);
+  const after = preview(d, resolver, best.edits);
+  if (!after.ok) throw Error(JSON.stringify(after.diagnostics));
+  for (const layout of [final, after.document]) {
+    const points = pinPoints(layout, resolver);
+    const host = points.find(
+      (p) => p.instanceId === "0-1" && p.pinName === "2",
+    )!.point;
+    for (const id of ["ground-a", "ground-b"]) {
+      const pin = points.find((p) => p.instanceId === id)!.point;
+      expect(Math.hypot(pin.x - host.x, pin.y - host.y)).toBeLessThanOrEqual(
+        60,
+      );
+    }
+    expect(touchingPins(layout, resolver)).toEqual(seats);
+    expect(connectionsIntact(layout, resolver)).toBe(true);
+  }
+  expect(
+    layoutAspectMetrics(after.document, resolver).layout.area,
+  ).toBeLessThan(layoutAspectMetrics(final, resolver).layout.area);
+}, 30000);
+
+it("allows only licensed coincident pins and their overlapping bounds", () => {
+  const d = rows(2, 300, 160);
+  const neighbor = d.instances[1]!;
+  const policy = contactPolicy(d, routing.freezePinGroups(d, resolver));
+  const unlicensed = contactPolicy(d, []);
+  expect(contactGeometryProblem(d, resolver, unlicensed)).toBeUndefined();
+
+  neighbor.placement = placement(40, 0, "none", 270);
+  expect(contactGeometryProblem(d, resolver, policy)).toBeUndefined();
+  expect(contactGeometryProblem(d, resolver, unlicensed)).toBe(
+    "R10: unlicensed or obstructed coincident pins",
+  );
+
+  const other = d.instances[3]!;
+  other.placement = placement(35, 160, "none", 270);
+  expect(contactGeometryProblem(d, resolver, policy)).toBe(
+    "R10: bounds overlap 1-0, 1-1",
+  );
+  other.placement = placement(300, 160, "none", 270);
+  neighbor.placement = placement(35, 0, "none", 270);
+  expect(contactGeometryProblem(d, resolver, policy)).toBe(
+    "R10: bounds overlap 0-0, 0-1",
+  );
+});
+
 it("keeps the incumbent when the deadline expires inside finish", () => {
-  const d = rows(4, 200, 80);
+  const d = rows(4, 300, 160);
   const { result } = replayPlaced(d);
   const original = structuredClone(result);
   const clock = vi.spyOn(Date, "now").mockReturnValue(0);
+  const validate = vi.spyOn(transaction, "preview");
   const search = { seed: 1, evaluations: 1, deadline: 1000 };
   try {
+    const uninterrupted = vi.fn(identity);
     expect(
-      compactFinalist2D(d, resolver, { search }, result, identity),
+      compactFinalist2D(d, resolver, { search }, result, uninterrupted),
     ).not.toBe(result);
+    expect(uninterrupted.mock.calls.length).toBeGreaterThan(1);
     const finish = vi.fn((candidate: AutoLayoutResult) => {
+      validate.mockClear();
       clock.mockReturnValue(search.deadline);
       return candidate;
     });
@@ -563,12 +663,41 @@ it("keeps the incumbent when the deadline expires inside finish", () => {
       result,
     );
     expect(finish).toHaveBeenCalledTimes(1);
+    expect(validate).not.toHaveBeenCalled();
     expect(result).toEqual(original);
   } finally {
+    validate.mockRestore();
     clock.mockRestore();
   }
 }, 30000);
 
+it("keeps the incumbent when retaining the winning candidate's metrics expires", () => {
+  const d = rows(4, 200, 80);
+  const { result } = replayPlaced(d);
+  const original = structuredClone(result);
+  const priorMetrics = refinement.refinementMetrics(result);
+  const clock = vi.spyOn(Date, "now").mockReturnValue(0);
+  const search = { seed: 1, evaluations: 1, deadline: 1000 };
+  const retain = refinement.retainRefinementMetrics;
+  const score = vi
+    .spyOn(refinement, "retainRefinementMetrics")
+    .mockImplementation((selected, previous, resolver) => {
+      retain(selected, previous, resolver);
+      clock.mockReturnValue(search.deadline);
+    });
+  try {
+    expect(compactFinalist2D(d, resolver, { search }, result, identity)).toBe(
+      result,
+    );
+    expect(score).toHaveBeenCalledTimes(1);
+    expect(score.mock.calls[0]![0].result).not.toBe(result);
+    expect(refinement.refinementMetrics(result)).toBe(priorMetrics);
+    expect(result).toEqual(original);
+  } finally {
+    score.mockRestore();
+    clock.mockRestore();
+  }
+}, 30000);
 it("reserves a seated ground marker's clearance below its host", () => {
   const d = circuit(
     { upper: "resistor", lower: "resistor", ground: "ground" },
