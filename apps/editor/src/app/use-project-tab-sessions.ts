@@ -24,6 +24,8 @@ import type { AgentCommitOutcome } from "../agent/browser-agent-host";
 import { flushSync } from "react-dom";
 import type { CameraRectInput } from "../canvas/fit-view";
 import type { CameraRuntime } from "../canvas/camera-runtime";
+import { holdAfterFailure, onlineEpoch } from "../document/cloud-auto-save";
+import { projectFileBaseName } from "../document/project-file-service";
 import {
   EditorDocumentController,
   type useDocumentController,
@@ -68,8 +70,43 @@ import type { EditorMode } from "../features/editor-shell/editor-mode";
 import type { HighlightedNetOrigin } from "./use-editor-derived-model";
 import type { useAgentProjectResources } from "./use-agent-hosts";
 import { executeProjectTransaction } from "@icm/edit-engine";
-import type { CloudProjectStore } from "../services/editor-services";
-import type { CloudProjectSummary } from "../features/editor-shell/cloud-projects";
+import type {
+  CloudProjectStore,
+  EditorServices,
+} from "../services/editor-services";
+import type {
+  CloudProjectBinding,
+  CloudProjectSaveOutcome,
+  CloudProjectSummary,
+} from "../features/editor-shell/cloud-projects";
+
+function sameCloudBinding(
+  a: CloudProjectBinding | null,
+  b: CloudProjectBinding | null,
+): boolean {
+  return a === b || (a?.id === b?.id && a?.revision === b?.revision);
+}
+
+function formatCloudSaveCloseFailure(outcome: CloudProjectSaveOutcome): string {
+  switch (outcome.status) {
+    case "conflict":
+      return "This Project changed elsewhere. Export a backup or close without saving.";
+    case "unreachable":
+      return "Could not reach Cloud storage. Retry when online or close without saving.";
+    case "signed-out":
+      return "Sign in again to save to Cloud.";
+    case "too-large":
+      return "This Project is too large for Cloud storage; export a backup instead.";
+    case "limit":
+      return "Cloud Project limit reached; delete an older Project or export a backup.";
+    case "not-found":
+      return "This Cloud Project no longer exists; export a backup or close without saving.";
+    case "rejected":
+      return outcome.message || "Could not save to Cloud.";
+    case "saved":
+      return "";
+  }
+}
 
 /**
  * A tab's import review: the last SPICE import's report, whether it is
@@ -251,6 +288,8 @@ type AgentProjectResourcesOptions = Parameters<
 
 interface ProjectTabSessionsOptions {
   openProjectFile: ProjectFileLifecycle["openProjectFile"];
+  saveProjectToCloud: ProjectFileLifecycle["saveProjectToCloud"];
+  exportDelivery: EditorServices["exportDelivery"];
   projectStore: CloudProjectStore | null;
   currentCloudProjects(): readonly CloudProjectSummary[];
   onCloudProjectSaved(project: CloudProjectSummary): void;
@@ -355,6 +394,8 @@ interface ProjectTabSessionsOptions {
 /** The window's project tabs: one session per tab, saved with the window. */
 export function useProjectTabSessions({
   openProjectFile,
+  saveProjectToCloud,
+  exportDelivery,
   projectStore,
   currentCloudProjects,
   onCloudProjectSaved,
@@ -1243,6 +1284,272 @@ export function useProjectTabSessions({
       outcome,
     );
   }
+  const [closingSaveBusy, setClosingSaveBusy] = useState(false);
+  const closingSaveInFlight = useRef(false);
+
+  async function saveSingleTabForClose(
+    tabId: string,
+  ): Promise<{ ok: true } | { ok: false; message: string }> {
+    const entry = projectTabs.entries().find((item) => item.id === tabId);
+    if (!entry || (!entry.session.dirty && !entry.session.unsafe))
+      return { ok: true };
+    if (projectStore) {
+      if (tabId === projectTabs.currentId()) {
+        if (codeDraftDirty)
+          return {
+            ok: false,
+            message:
+              "Apply or discard your code draft before saving and closing.",
+          };
+        const outcome = await saveProjectToCloud();
+        if (outcome.status !== "saved")
+          return { ok: false, message: formatCloudSaveCloseFailure(outcome) };
+        if (tabId === projectTabs.currentId() && isDirtyWork())
+          return {
+            ok: false,
+            message: "New edits arrived while saving; try closing again.",
+          };
+        return { ok: true };
+      }
+      const startBinding = entry.session.file.cloudBinding;
+      const activeBinding = projectTabs
+        .entries()
+        .find((item) => item.id === projectTabs.currentId())?.session
+        .file.cloudBinding;
+      if (
+        startBinding &&
+        activeBinding?.id === startBinding.id &&
+        isSaveInFlight()
+      )
+        return {
+          ok: false,
+          message: "This Cloud Project is saving in another tab.",
+        };
+      const release = reserveBackgroundCloudSave(tabId);
+      if (!release)
+        return {
+          ok: false,
+          message: "A Cloud save of this tab is already in progress.",
+        };
+      try {
+        const controller = entry.session.controller;
+        const candidate = controller.project;
+        const findLive = () =>
+          projectTabs
+            .entries()
+            .find(
+              (item) =>
+                item.id === tabId && item.session.controller === controller,
+            );
+        const writeSequence = (entry.session.file.cloudWriteSequence ?? 0) + 1;
+        entry.session.file.cloudWriteSequence = writeSequence;
+        entry.session.file.persistenceState = "saving";
+        projectTabs.changed();
+        const epochAtStart = onlineEpoch();
+        let outcome: CloudProjectSaveOutcome;
+        try {
+          outcome = await projectStore.save(candidate, startBinding);
+        } catch (error) {
+          const live = findLive();
+          if (
+            live &&
+            live.session.file.cloudWriteSequence === writeSequence &&
+            sameCloudBinding(live.session.file.cloudBinding, startBinding)
+          ) {
+            live.session.file = {
+              ...live.session.file,
+              persistenceState: "failed",
+              ...(startBinding
+                ? {
+                    autoSaveHold: holdAfterFailure(
+                      live.session.file.autoSaveHold ?? null,
+                      startBinding,
+                      "threw",
+                      epochAtStart,
+                    ),
+                  }
+                : {}),
+            };
+            if (tabId === projectTabs.currentId())
+              restoreFileSession(live.session.file);
+            projectTabs.changed();
+          }
+          return {
+            ok: false,
+            message:
+              error instanceof Error
+                ? error.message
+                : "Could not save to Cloud.",
+          };
+        }
+        const live = findLive();
+        if (!live) return { ok: true };
+        if (
+          live.session.file.cloudWriteSequence !== writeSequence ||
+          !sameCloudBinding(live.session.file.cloudBinding, startBinding)
+        )
+          return {
+            ok: false,
+            message: "A newer Cloud save superseded this save.",
+          };
+        if (outcome.status === "saved") {
+          const stillCurrent =
+            sameProjectContent(live.session.controller.project, candidate) &&
+            (tabId !== projectTabs.currentId() || !codeDraftDirty);
+          const file = live.session.file;
+          live.session.file = {
+            ...file,
+            cloudBinding: {
+              id: outcome.project.id,
+              revision: outcome.project.revision,
+            },
+            savedBaseline: {
+              project: candidate,
+              viewBox: { ...live.session.view },
+            },
+            persistenceState: stillCurrent ? "clean" : "dirty",
+            autoSaveHold: null,
+            autoSaveArmed: !stillCurrent && file.autoSaveArmed === true,
+          };
+          live.session.dirty = !stillCurrent;
+          live.session.unsafe = !stillCurrent;
+          if (tabId === projectTabs.currentId()) {
+            restoreFileSession(live.session.file);
+            stageRecovery(controller.project, {
+              cloudBinding: live.session.file.cloudBinding,
+              unsavedAtSnapshot: !stillCurrent,
+            });
+            void flushRecovery();
+          } else {
+            writeRecoverySessionSnapshot(
+              live.session.recovery,
+              controller.project,
+              {
+                cloudBinding: live.session.file.cloudBinding,
+                unsavedAtSnapshot: !stillCurrent,
+              },
+            );
+          }
+          onCloudProjectSaved(outcome.project);
+          projectTabs.changed();
+          if (!stillCurrent)
+            return {
+              ok: false,
+              message: "New edits arrived while saving; try closing again.",
+            };
+          return { ok: true };
+        }
+        live.session.file = {
+          ...live.session.file,
+          persistenceState:
+            outcome.status === "conflict"
+              ? "conflict"
+              : outcome.status === "unreachable"
+                ? "offline"
+                : "failed",
+          ...(startBinding
+            ? {
+                autoSaveHold: holdAfterFailure(
+                  live.session.file.autoSaveHold ?? null,
+                  startBinding,
+                  outcome,
+                  epochAtStart,
+                ),
+              }
+            : {}),
+        };
+        if (tabId === projectTabs.currentId())
+          restoreFileSession(live.session.file);
+        projectTabs.changed();
+        return { ok: false, message: formatCloudSaveCloseFailure(outcome) };
+      } finally {
+        release();
+      }
+    }
+    // Local-only mode (no Cloud Project store): export as .icproj.json.
+    try {
+      const candidate = entry.session.controller.project;
+      const fileName = `${projectFileBaseName(candidate.name)}.icproj.json`;
+      const result = await exportDelivery.deliverFile({
+        bytes: snapshotSerializer.serialize(candidate),
+        mediaType: "application/json",
+        suggestedName: fileName,
+      });
+      if (result.status === "cancelled") {
+        setStatus("Export cancelled");
+        return {
+          ok: false,
+          message: "Export cancelled; the tab stayed open.",
+        };
+      }
+      setStatus(
+        result.status === "saved"
+          ? `Exported: ${fileName}`
+          : `Export requested: ${fileName}`,
+      );
+      const live = projectTabs.entries().find((item) => item.id === tabId);
+      if (
+        live &&
+        sameProjectContent(live.session.controller.project, candidate)
+      ) {
+        live.session.dirty = false;
+        live.session.unsafe = false;
+        projectTabs.changed();
+      }
+      return { ok: true };
+    } catch (error) {
+      return {
+        ok: false,
+        message:
+          error instanceof Error ? error.message : "Could not export Project.",
+      };
+    }
+  }
+
+  async function saveAndCloseTabs(
+    ids: readonly string[],
+  ): Promise<{ closed: boolean; error?: string }> {
+    if (closingSaveInFlight.current)
+      return {
+        closed: false,
+        error: "A tab close save is already in progress.",
+      };
+    if (ids.includes(projectTabs.currentId())) {
+      const blocker = projectHoldReason({
+        ...editInProgress(),
+        saving: cloudMutation.current || backgroundCloudSaves.current.size > 0,
+        replaceGuard: !!replaceGuard,
+        recoveryDialogOpen,
+      });
+      if (blocker)
+        return {
+          closed: false,
+          error: `Can't close tab yet: ${blocker}.`,
+        };
+    }
+    closingSaveInFlight.current = true;
+    setClosingSaveBusy(true);
+    try {
+      for (const id of ids) {
+        const result = await saveSingleTabForClose(id);
+        if (!result.ok) {
+          setStatus(`Could not save before closing: ${result.message}`);
+          return { closed: false, error: result.message };
+        }
+      }
+      await projectTabs.closeMany(ids, () => createTabSession());
+      const gone = new Set(ids);
+      if (projectTabs.entries().some((item) => gone.has(item.id))) {
+        const reason = projectSwitchBlocker() ?? "Could not close tab yet.";
+        return { closed: false, error: reason };
+      }
+      return { closed: true };
+    } finally {
+      closingSaveInFlight.current = false;
+      setClosingSaveBusy(false);
+    }
+  }
+
   function createNewTabSession(): TabSession {
     const existingNames = [
       ...projectTabs
@@ -1261,6 +1568,8 @@ export function useProjectTabSessions({
   return {
     openImportFile,
     cloudManagementBusy,
+    closingSaveBusy,
+    saveAndCloseTabs,
     isCloudManagementInFlight: () => cloudMutation.current,
     isSigningOut: () => signingOut.current,
     reserveBackgroundCloudSave,

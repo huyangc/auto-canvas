@@ -1944,7 +1944,7 @@
   max-width: 16rem;
   height: var(--icm-control-h);
   padding: 0 6px;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: var(--icm-radius-sm);
   color: var(--icm-text);
   background: transparent;
@@ -1958,14 +1958,64 @@ button.app-project-name {
   cursor: pointer;
 }
 
-button.app-project-name:hover {
+button.app-project-name:hover,
+button.app-project-name:focus-visible {
+  border-color: var(--icm-border-strong);
   background: var(--icm-surface-hover);
+}
+
+.app-project-name-edit-icon {
+  flex: 0 0 auto;
+  color: var(--icm-text-muted);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+button.app-project-name:hover .app-project-name-edit-icon,
+button.app-project-name:focus-visible .app-project-name-edit-icon {
+  opacity: 0.75;
+}
+
+.app-chrome-main .app-brand > .app-project-name-input {
+  box-sizing: border-box;
+  flex: 0 1 auto;
+  min-width: 6rem;
+  max-width: 16rem;
+  padding: 0 6px;
+  border: 1px solid var(--icm-accent);
+  background: var(--icm-surface);
+  outline: 2px solid var(--icm-accent-soft);
+  outline-offset: 0;
 }
 
 .app-project-name-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.app-chrome-main .app-new-project {
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 0 10px;
+}
+
+@media (max-width: 900px) {
+  .app-chrome-main .app-new-project {
+    width: var(--icm-control-h);
+    padding-inline: 0;
+    justify-content: center;
+  }
+
+  .app-chrome-main .app-new-project .app-action-label {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-chrome-main .app-new-project {
+    display: none;
+  }
 }
 
 @media (max-width: 720px) {

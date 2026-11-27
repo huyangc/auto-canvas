@@ -3,25 +3,35 @@ import { useEffect, useRef, useState, type ButtonHTMLAttributes } from "react";
 /** A local second step, not a modal: keep the decision beside its trigger. */
 export function InlineConfirm({
   children,
+  primaryLabel,
+  primaryPendingLabel = "Saving…",
+  onPrimary,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
   promptLabel,
+  externalError = null,
   dismissOnOutsideClick = false,
   onConfirm,
   open: controlledOpen,
   onOpenChange,
   ...triggerProps
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
+  primaryLabel?: string | undefined;
+  primaryPendingLabel?: string | undefined;
+  onPrimary?: (() => void | Promise<unknown>) | undefined;
   confirmLabel?: string;
   cancelLabel?: string;
   promptLabel?: string;
+  externalError?: string | null | undefined;
   dismissOnOutsideClick?: boolean;
   onConfirm(): void | Promise<unknown>;
   open?: boolean;
   onOpenChange?(open: boolean): void;
 }) {
   const [localOpen, setLocalOpen] = useState(false);
-  const [pending, setPending] = useState(false);
+  const [pendingAction, setPendingAction] = useState<
+    "primary" | "confirm" | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const root = useRef<HTMLSpanElement>(null);
@@ -30,6 +40,8 @@ export function InlineConfirm({
   const onOpenChangeRef = useRef(onOpenChange);
   onOpenChangeRef.current = onOpenChange;
   const open = controlledOpen ?? localOpen;
+  const pending = pendingAction !== null;
+  const shownError = error ?? externalError;
   const change = (next: boolean) => {
     setLocalOpen(next);
     onOpenChangeRef.current?.(next);
@@ -66,12 +78,16 @@ export function InlineConfirm({
       trigger.current?.focus({ preventScroll: true }),
     );
   };
-  const confirm = async () => {
+  const runAction = async (
+    kind: "primary" | "confirm",
+    action: () => void | Promise<unknown>,
+  ) => {
     if (running.current) return;
     running.current = true;
-    setPending(true);
+    setPendingAction(kind);
+    setError(null);
     try {
-      await onConfirm();
+      await action();
       const restoreFocus = root.current?.contains(document.activeElement);
       change(false);
       if (restoreFocus)
@@ -86,7 +102,7 @@ export function InlineConfirm({
       );
     } finally {
       running.current = false;
-      setPending(false);
+      setPendingAction(null);
     }
   };
   return (
@@ -125,13 +141,25 @@ export function InlineConfirm({
               <span className="inline-confirm-prompt">{promptLabel}</span>
             ) : null}
             <span className="inline-confirm-actions">
+              {primaryLabel && onPrimary ? (
+                <button
+                  type="button"
+                  className="inline-confirm-primary"
+                  disabled={pending || triggerProps.disabled}
+                  onClick={() => void runAction("primary", onPrimary)}
+                >
+                  {pendingAction === "primary"
+                    ? primaryPendingLabel
+                    : primaryLabel}
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="inline-confirm-danger"
                 disabled={pending || triggerProps.disabled}
-                onClick={() => void confirm()}
+                onClick={() => void runAction("confirm", onConfirm)}
               >
-                {pending ? "Working…" : confirmLabel}
+                {pendingAction === "confirm" ? "Working…" : confirmLabel}
               </button>
               <button
                 type="button"
@@ -143,9 +171,9 @@ export function InlineConfirm({
               </button>
             </span>
           </span>
-          {error ? (
+          {shownError ? (
             <span className="inline-confirm-error" role="alert">
-              {error}
+              {shownError}
             </span>
           ) : null}
         </span>

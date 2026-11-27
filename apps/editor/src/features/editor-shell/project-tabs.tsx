@@ -15,6 +15,11 @@ const InlineConfirm = lazy(() =>
   })),
 );
 
+export interface TabSaveAndCloseResult {
+  closed: boolean;
+  error?: string;
+}
+
 export function ProjectTabs({
   cloudEnabled = true,
   tabs,
@@ -25,13 +30,14 @@ export function ProjectTabs({
   onEditingChange,
   onClose,
   onCloseMany,
+  onSaveAndClose,
   closeActiveTab,
   onNew,
   onOpenFile,
   onOpenCloudProjects,
 }: {
   cloudEnabled?: boolean;
-  tabs: { id: string; name: string; dirty: boolean }[];
+  tabs: { id: string; name: string; dirty: boolean; cloudId?: string | null }[];
   activeId: string;
   busy: boolean;
   onSelect(id: string): Promise<boolean>;
@@ -40,6 +46,11 @@ export function ProjectTabs({
   onClose(id: string): void;
   /** Close Others and Close All, after any unsaved tab is confirmed. */
   onCloseMany(ids: readonly string[]): void;
+  /**
+   * Save dirty tab(s) (incrementally to Cloud or local export) and close them.
+   * When omitted, dirty tabs fall back to the 2-way discard/keep decision.
+   */
+  onSaveAndClose?: (ids: readonly string[]) => Promise<TabSaveAndCloseResult>;
   /** Filled with the active tab's ×, for File's Close tab. */
   closeActiveTab?: RefObject<((trigger: HTMLElement | null) => void) | null>;
   onNew(): void;
@@ -99,13 +110,25 @@ export function ProjectTabs({
     if (!stripShown) finishRename(nameInput.current?.value ?? null);
   }, [stripShown]);
   const [closing, setClosing] = useState<string | null>(null);
+  const [closeError, setCloseError] = useState<string | null>(null);
+  const [savingClose, setSavingClose] = useState(false);
+  const savingCloseRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
+  );
+  const effectiveBusy = busy || savingClose;
   const selecting = useRef<{ id: string; promise: Promise<boolean> } | null>(
     null,
   );
   const selectTab = (id: string) => {
-    if (busy) return;
+    if (effectiveBusy) return;
     finishRename(nameInput.current?.value ?? null);
     setClosing(null);
+    setCloseError(null);
     const request = { id, promise: onSelect(id) };
     selecting.current = request;
     void request.promise.finally(() => {
@@ -114,7 +137,10 @@ export function ProjectTabs({
   };
   const closeTrigger = useRef<HTMLElement | null>(null);
   const closeTarget = tabs.find((tab) => tab.id === closing);
-  useEffect(() => setClosing(null), [activeId]);
+  useEffect(() => {
+    setClosing(null);
+    setCloseError(null);
+  }, [activeId]);
   // A tab's right-click menu, and several tabs it closes once confirmed.
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(
     null,
@@ -126,31 +152,110 @@ export function ProjectTabs({
   const unsaved = (id: string) =>
     tabs.find((tab) => tab.id === id)?.dirty === true ||
     renamedByClick.current === id;
+  /** Bound to an existing Cloud Project: eligible for automatic incremental save on close. */
+  const cloudBound = (id: string) =>
+    cloudEnabled && tabs.find((tab) => tab.id === id)?.cloudId != null;
   const unsavedClosing = (closingMany ?? []).filter(unsaved).length;
-  /** Closes one tab, asking first when it holds unsaved edits. */
+  const saveActionLabel = cloudEnabled ? "Save & close" : "Export & close";
+  const savePendingLabel = cloudEnabled ? "Saving…" : "Exporting…";
+  const runAutoSaveClose = async (
+    ids: readonly string[],
+    onFailure: (message: string) => void,
+  ) => {
+    if (!onSaveAndClose || savingCloseRef.current) return;
+    savingCloseRef.current = true;
+    setSavingClose(true);
+    try {
+      const result = await onSaveAndClose(ids);
+      if (!mountedRef.current) return;
+      if (!result.closed) {
+        onFailure(
+          result.error ?? "Could not save to Cloud before closing. Try again.",
+        );
+      }
+    } catch (error) {
+      if (!mountedRef.current) return;
+      onFailure(
+        error instanceof Error
+          ? error.message
+          : "Could not save to Cloud before closing. Try again.",
+      );
+    } finally {
+      savingCloseRef.current = false;
+      if (mountedRef.current) setSavingClose(false);
+    }
+  };
+  const runConfirmSaveAndClose = async (ids: readonly string[]) => {
+    if (!onSaveAndClose) return;
+    const result = await onSaveAndClose(ids);
+    if (!result.closed) {
+      throw new Error(
+        result.error ??
+          (cloudEnabled
+            ? "Could not save to Cloud. Try again."
+            : "Could not export the Project. Try again."),
+      );
+    }
+  };
+  /**
+   * Closes one tab:
+   * - Clean tab: closes immediately.
+   * - Dirty Cloud-bound tab: automatically saves incrementally to Cloud and
+   *   closes on success; prompts only on failure.
+   * - Dirty unbound tab: asks before closing (Save/Export & close, Close
+   *   without saving, Keep open).
+   */
   const closeOne = (id: string, trigger: HTMLElement | null) => {
-    if (!tabs.some((item) => item.id === id)) return;
-    if (unsaved(id)) {
+    if (effectiveBusy || !tabs.some((item) => item.id === id)) return;
+    if (!unsaved(id)) {
+      onClose(id);
+      return;
+    }
+    if (onSaveAndClose && cloudBound(id)) {
       closeTrigger.current = trigger;
       setClosingMany(null);
-      setClosing(id);
-    } else onClose(id);
+      setClosing(null);
+      setCloseError(null);
+      void runAutoSaveClose([id], (message) => {
+        setCloseError(message);
+        setClosingMany(null);
+        setClosing(id);
+      });
+      return;
+    }
+    closeTrigger.current = trigger;
+    setCloseError(null);
+    setClosingMany(null);
+    setClosing(id);
   };
   useEffect(() => {
     if (!closeActiveTab) return;
     closeActiveTab.current = (trigger) => {
-      if (!busy) closeOne(activeId, trigger);
+      if (!effectiveBusy) closeOne(activeId, trigger);
     };
   });
   const closeMany = (ids: readonly string[]) => {
-    if (!ids.length) return;
+    if (effectiveBusy || !ids.length) return;
     setClosing(null);
-    if (ids.some(unsaved)) setClosingMany(ids);
-    else onCloseMany(ids);
+    setCloseError(null);
+    const dirtyIds = ids.filter(unsaved);
+    if (!dirtyIds.length) {
+      onCloseMany(ids);
+      return;
+    }
+    if (onSaveAndClose && dirtyIds.every(cloudBound)) {
+      void runAutoSaveClose(ids, (message) => {
+        setCloseError(message);
+        setClosing(null);
+        setClosingMany(ids);
+      });
+      return;
+    }
+    setClosingMany(ids);
   };
   const keyboardFocus = useRef(false);
   useEffect(() => {
-    if (busy || renameSession.current) return;
+    if (effectiveBusy || renameSession.current) return;
     const focused =
       keyboardFocus.current || list.current?.contains(document.activeElement);
     keyboardFocus.current = false;
@@ -161,7 +266,7 @@ export function ProjectTabs({
     list.current
       ?.querySelector('[aria-selected="true"]')
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [activeId, tabs.length, busy]);
+  }, [activeId, tabs.length, effectiveBusy]);
   return (
     <div
       className="project-tabs-workspace"
@@ -201,7 +306,7 @@ export function ProjectTabs({
                 role="tab"
                 aria-selected={tab.id === activeId}
                 tabIndex={tab.id === activeId ? 0 : -1}
-                disabled={busy && selecting.current?.id !== tab.id}
+                disabled={effectiveBusy && selecting.current?.id !== tab.id}
                 title={tab.name}
                 aria-description="Double-click to rename"
                 data-editing={editing?.id === tab.id}
@@ -215,7 +320,7 @@ export function ProjectTabs({
                   const selected =
                     selecting.current?.id === tab.id
                       ? selecting.current.promise
-                      : Promise.resolve(!busy && tab.id === activeId);
+                      : Promise.resolve(!effectiveBusy && tab.id === activeId);
                   const session = {
                     id: tab.id,
                     original: tab.name,
@@ -285,7 +390,7 @@ export function ProjectTabs({
                 type="button"
                 aria-label={`Close tab ${tab.name}`}
                 data-tab-close={tab.id}
-                disabled={busy}
+                disabled={effectiveBusy}
                 onClick={(event) => closeOne(tab.id, event.currentTarget)}
               >
                 ×
@@ -297,7 +402,7 @@ export function ProjectTabs({
           type="button"
           title="New project tab"
           aria-label="New project tab"
-          disabled={busy}
+          disabled={effectiveBusy}
           onClick={onNew}
         >
           ＋
@@ -306,7 +411,7 @@ export function ProjectTabs({
           type="button"
           title="Open file in new tab"
           aria-label="Open file in new tab"
-          disabled={busy}
+          disabled={effectiveBusy}
           onClick={onOpenFile}
         >
           ↗
@@ -318,7 +423,7 @@ export function ProjectTabs({
             title="Open Cloud Project…"
             aria-label="Open Cloud Project…"
             aria-haspopup="dialog"
-            disabled={busy}
+            disabled={effectiveBusy}
             onClick={onOpenCloudProjects}
           >
             <svg
@@ -359,7 +464,7 @@ export function ProjectTabs({
               type="button"
               role="menuitem"
               className="context-menu-item"
-              disabled={busy || !ids.length}
+              disabled={effectiveBusy || !ids.length}
               onClick={() => {
                 setMenu(null);
                 if (label === "Close")
@@ -392,16 +497,28 @@ export function ProjectTabs({
           <Suspense fallback={null}>
             <InlineConfirm
               open
-              disabled={busy}
+              disabled={effectiveBusy}
               aria-label={`Close ${closingMany.length === 1 ? "1 tab" : `${closingMany.length} tabs`}`}
+              {...(onSaveAndClose
+                ? {
+                    primaryLabel: saveActionLabel,
+                    primaryPendingLabel: savePendingLabel,
+                    onPrimary: () => runConfirmSaveAndClose(closingMany),
+                  }
+                : {})}
+              externalError={closeError}
               confirmLabel="Close without saving"
               cancelLabel="Keep open"
               onOpenChange={(next) => {
-                if (!next) setClosingMany(null);
+                if (!next) {
+                  setClosingMany(null);
+                  setCloseError(null);
+                }
               }}
               onConfirm={() => {
                 onCloseMany(closingMany);
                 setClosingMany(null);
+                setCloseError(null);
               }}
             >
               Close tabs
@@ -418,19 +535,29 @@ export function ProjectTabs({
             <InlineConfirm
               key={closeTarget.id}
               open
-              disabled={busy}
+              disabled={effectiveBusy}
               aria-label={`Close tab ${closeTarget.name}`}
+              {...(onSaveAndClose
+                ? {
+                    primaryLabel: saveActionLabel,
+                    primaryPendingLabel: savePendingLabel,
+                    onPrimary: () => runConfirmSaveAndClose([closeTarget.id]),
+                  }
+                : {})}
+              externalError={closeError}
               confirmLabel="Close without saving"
               cancelLabel="Keep open"
               onOpenChange={(next) => {
                 if (!next) {
                   setClosing(null);
+                  setCloseError(null);
                   requestAnimationFrame(() => closeTrigger.current?.focus());
                 }
               }}
               onConfirm={() => {
                 onClose(closeTarget.id);
                 setClosing(null);
+                setCloseError(null);
               }}
             >
               Close tab

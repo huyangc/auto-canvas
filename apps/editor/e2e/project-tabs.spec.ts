@@ -302,7 +302,7 @@ test("tab file opening is additive, and closing one tab, the others or all asks 
   ).toBeFocused();
   const strip = page.getByTestId("project-tab-close-decision");
   await expect(strip.locator(".inline-confirm-decision")).toHaveText(
-    "Close without savingKeep open",
+    "Save & closeClose without savingKeep open",
   );
   expect(await canvas.boundingBox()).toEqual(beforeClose);
   await expect(canvas).toHaveAttribute("viewBox", beforeView!);
@@ -1367,7 +1367,7 @@ test("with one project File → Close tab asks as the tab's × does, and keeps t
   await projectTabAction(page, "Close tab");
   await expect(decision).toBeVisible();
   await expect(decision.locator(".inline-confirm-decision")).toHaveText(
-    "Close without savingKeep open",
+    "Save & closeClose without savingKeep open",
   );
   await decision
     .getByRole("button", { name: "Keep open", exact: true })

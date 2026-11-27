@@ -1337,7 +1337,7 @@ const fileTabActions: readonly Place[] = [
   {
     menu: "File",
     items: [
-      "New project tab",
+      "New Project",
       "Open file in new tab",
       "Open Cloud Project…",
       "Close tab",
@@ -1667,12 +1667,21 @@ test("the top bar names the project on one row, in both modes", async ({
       }
     }
   }
-  // The name opens Project Info, where it is changed.
+  // Clicking the top-bar name renames the project in place; Project Info stays in File.
   await page.setViewportSize({ width: 1280, height: 800 });
   await name.click();
-  await expect(
-    page.getByRole("dialog", { name: "Project Info" }),
-  ).toBeVisible();
+  const field = page.getByRole("textbox", {
+    name: "Project name",
+    exact: true,
+  });
+  await expect(field).toBeVisible();
+  await expect(field).toBeFocused();
+  await field.fill("Renamed inline");
+  await field.press("Enter");
+  await expect(field).toHaveCount(0);
+  await expect(name.locator(".app-project-name-text")).toHaveText(
+    "Renamed inline",
+  );
 });
 
 const clipped = (page: Page, testId: string) =>

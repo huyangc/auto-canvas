@@ -89,6 +89,8 @@ export function EditorMenuBar({
   setCloudProjectsOpen,
   projectNameEditing,
   cloudManagementBusy,
+  closingSaveBusy,
+  saveAndCloseTabs,
   savedProjectBaseline,
   isDirtyWork,
   hasUnsavedChanges,
@@ -161,6 +163,8 @@ export function EditorMenuBar({
   setCloudProjectsOpen: Dispatch<SetStateAction<boolean>>;
   projectNameEditing: RefObject<boolean>;
   cloudManagementBusy: ProjectTabSessions["cloudManagementBusy"];
+  closingSaveBusy: ProjectTabSessions["closingSaveBusy"];
+  saveAndCloseTabs: ProjectTabSessions["saveAndCloseTabs"];
   savedProjectBaseline: ProjectFileLifecycle["savedProjectBaseline"];
   isDirtyWork: ProjectFileLifecycle["isDirtyWork"];
   hasUnsavedChanges: ProjectFileLifecycle["hasUnsavedChanges"];
@@ -242,7 +246,7 @@ export function EditorMenuBar({
   // with one project. Its Shelf is File's in modes without an account and
   // the user menu's in accounts mode.
   const tabActions = {
-    busy: projectTabs.busy || cloudManagementBusy,
+    busy: projectTabs.busy || cloudManagementBusy || closingSaveBusy,
     onNew: () => void projectTabs.open(() => createNewTabSession()),
     onOpenFile: () => tabProjectInputRef.current?.click(),
     onOpenCloudProjects: () => setCloudProjectsOpen(true),
@@ -272,6 +276,7 @@ export function EditorMenuBar({
             onCloseMany={(ids) => {
               void projectTabs.closeMany(ids, () => createTabSession());
             }}
+            onSaveAndClose={saveAndCloseTabs}
             onNew={tabActions.onNew}
             onOpenFile={tabActions.onOpenFile}
             onOpenCloudProjects={tabActions.onOpenCloudProjects}
@@ -292,6 +297,10 @@ export function EditorMenuBar({
       }
       projectName={project.name}
       hasUnsavedWork={hasUnsavedChanges()}
+      onRenameProject={renameProject}
+      onProjectNameEditingChange={(editing) => {
+        projectNameEditing.current = editing;
+      }}
       // Accounts mode opens Cloud Projects from the user menu instead of File.
       {...(projectStore
         ? {

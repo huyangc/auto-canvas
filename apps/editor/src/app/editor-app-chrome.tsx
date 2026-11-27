@@ -3,7 +3,14 @@ import {
   type AutoLayoutMenuActions,
 } from "../features/auto-layout/auto-layout-button";
 import type { AutoLayoutRunView } from "../features/auto-layout/auto-layout-label";
-import type { ReactNode, ComponentProps, RefObject } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+  type RefObject,
+} from "react";
 
 import {
   HeaderAccountMenu,
@@ -27,21 +34,106 @@ interface CommandAction {
 }
 
 /**
- * The top bar's project name: read-only, cut with an ellipsis when long, with
- * File's unsaved-work dot. It opens Project Info, where the name is changed.
- * The File menu's dot keeps the accessible "Unsaved changes"; this one is
- * decorative.
+ * The top bar's project name: cut with an ellipsis when long, with File's
+ * unsaved-work dot. Hovering shows an edit cue and clicking renames the
+ * project in place (File → Project Info remains available for renaming both
+ * the project and its Cell). The File menu's dot keeps the accessible
+ * "Unsaved changes"; this one is decorative.
  */
 function ProjectNameLabel({
   name,
   dirty,
+  onRename,
+  onEditingChange,
   onOpenInfo,
 }: {
   name: string;
   dirty: boolean;
+  onRename?: ((name: string) => void) | undefined;
+  onEditingChange?: ((editing: boolean) => void) | undefined;
   onOpenInfo: (() => void) | undefined;
 }) {
   const shown = name.trim() || "Untitled";
+  const [editing, setEditing] = useState<{
+    original: string;
+    propName: string;
+    width: number;
+  } | null>(null);
+  const editingRef = useRef(editing);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const onEditingChangeRef = useRef(onEditingChange);
+  onEditingChangeRef.current = onEditingChange;
+
+  const finishEditing = (value: string | null) => {
+    const session = editingRef.current;
+    if (!session) return;
+    editingRef.current = null;
+    setEditing(null);
+    onEditingChangeRef.current?.(false);
+    if (value === null || value === session.original) return;
+    const trimmed = value.trim();
+    if (trimmed && trimmed !== session.original && trimmed.length <= 120) {
+      onRename?.(trimmed);
+    }
+  };
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus({ preventScroll: true });
+      inputRef.current?.select();
+    }
+  }, [editing]);
+
+  // Cancel an active inline edit if the project name changes externally
+  // (e.g. tab switch, undo, or Project Info save).
+  useEffect(() => {
+    if (editingRef.current && name !== editingRef.current.propName) {
+      editingRef.current = null;
+      setEditing(null);
+      onEditingChangeRef.current?.(false);
+    }
+  }, [name]);
+
+  useEffect(
+    () => () => {
+      if (editingRef.current) {
+        editingRef.current = null;
+        onEditingChangeRef.current?.(false);
+      }
+    },
+    [],
+  );
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        type="text"
+        className="app-project-name app-project-name-input"
+        aria-label="Project name"
+        autoComplete="off"
+        maxLength={120}
+        defaultValue={editing.original}
+        style={{ width: editing.width }}
+        onBlur={(event) => finishEditing(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.nativeEvent.isComposing) return;
+          if (event.key === "Enter" || event.key === "Escape") {
+            event.preventDefault();
+            finishEditing(
+              event.key === "Enter" ? event.currentTarget.value : null,
+            );
+            requestAnimationFrame(() =>
+              triggerRef.current?.focus({ preventScroll: true }),
+            );
+          }
+        }}
+      />
+    );
+  }
+
   const content = (
     <>
       <span className="app-project-name-text">{shown}</span>
@@ -52,6 +144,46 @@ function ProjectNameLabel({
       ) : null}
     </>
   );
+
+  if (onRename) {
+    return (
+      <button
+        ref={triggerRef}
+        type="button"
+        className="app-project-name"
+        title={`${shown} · Click to rename`}
+        onClick={() => {
+          dismissOpenCommandMenus();
+          const measured = triggerRef.current?.getBoundingClientRect().width;
+          const width = Math.max(
+            96,
+            Math.min(256, Math.ceil(measured || 120) + 16),
+          );
+          const session = { original: shown, propName: name, width };
+          editingRef.current = session;
+          onEditingChangeRef.current?.(true);
+          setEditing(session);
+        }}
+      >
+        {content}
+        <svg
+          className="app-project-name-edit-icon"
+          viewBox="0 0 16 16"
+          width="12"
+          height="12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M11.5 2.5a1.5 1.5 0 0 1 2.1 2.1L5.8 12.4l-2.8.7.7-2.8 7.8-7.8Z" />
+        </svg>
+      </button>
+    );
+  }
+
   if (!onOpenInfo)
     return (
       <span className="app-project-name" title={shown}>
@@ -79,6 +211,8 @@ export interface EditorAppChromeProps {
   projectTabs?: ReactNode;
   projectName: string;
   hasUnsavedWork: boolean;
+  onRenameProject?: ((name: string) => void) | undefined;
+  onProjectNameEditingChange?: ((editing: boolean) => void) | undefined;
   fileCommands: ComponentProps<typeof FileCommandMenu>;
   /**
    * The account's Cloud Projects, listed in the user menu as My Cloud
@@ -119,6 +253,8 @@ export function EditorAppChrome({
   projectTabs,
   projectName,
   hasUnsavedWork,
+  onRenameProject,
+  onProjectNameEditingChange,
   fileCommands,
   accountCloudProjects,
   notebookUser,
@@ -152,6 +288,8 @@ export function EditorAppChrome({
           <ProjectNameLabel
             name={projectName}
             dirty={hasUnsavedWork}
+            onRename={onRenameProject}
+            onEditingChange={onProjectNameEditingChange}
             onOpenInfo={fileCommands.onOpenInfo}
           />
           <div className="app-history" role="group" aria-label="History">
@@ -182,6 +320,35 @@ export function EditorAppChrome({
             <ModeSwitch mode={editorMode} onChange={onChangeMode} />
             {coachVisible ? <ModeCoach onDismiss={onDismissCoach} /> : null}
           </div>
+          {fileCommands.projectTabs ? (
+            <button
+              type="button"
+              className="app-action app-new-project"
+              data-testid="new-project-button"
+              aria-label="New project"
+              title="New project (opens a new tab)"
+              disabled={fileCommands.projectTabs.busy}
+              onClick={() => {
+                dismissOpenCommandMenus();
+                fileCommands.projectTabs?.onNew();
+              }}
+            >
+              <svg
+                className="app-action-icon"
+                viewBox="0 0 16 16"
+                width="14"
+                height="14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <path d="M8 3.25v9.5M3.25 8h9.5" />
+              </svg>
+              <span className="app-action-label">New</span>
+            </button>
+          ) : null}
         </div>
         <div className="app-chrome-actions">
           {editorMode === "auto" ? (
