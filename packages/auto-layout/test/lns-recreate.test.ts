@@ -172,9 +172,9 @@ it("bounds APR work on a 120-resistor chain", () => {
       ]),
     ),
   );
-  const before = performance.now();
   const result = aprDetailPlace(doc, placed, resolver, new Set());
-  expect(performance.now() - before).toBeLessThan(150);
   expect(result.evaluations).toBeGreaterThan(1);
   expect(result.evaluations).toBeLessThanOrEqual(34);
+  expect(result.candidates.length).toBeLessThanOrEqual(34);
+  expect(result.placements.size).toBe(120);
 });
