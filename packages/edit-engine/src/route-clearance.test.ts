@@ -526,3 +526,51 @@ it("reports the cheaper detour when both tiers are blocked", () => {
     );
   }
 });
+
+it("keeps non-finite custom symbol bounds out of the sorted spatial index", () => {
+  const resistor = builtInSymbols.find((symbol) => symbol.id === "resistor")!;
+  const malformed = {
+    ...resistor,
+    id: "malformed-path",
+    primitives: [{ kind: "path" as const, data: "M 0 0 L 10" }],
+  };
+  const customResolver = new InMemorySymbolResolver([
+    ...builtInSymbols,
+    malformed,
+  ]);
+  const document = createEmptyDocument("nan-bounds", "NaN bounds");
+  document.instances = [
+    {
+      id: "far",
+      symbolId: "resistor",
+      placement: { position: { x: 1000, y: 0 }, rotation: 0, mirror: "none" },
+    },
+    {
+      id: "bad",
+      symbolId: "malformed-path",
+      placement: { position: { x: 500, y: 0 }, rotation: 90, mirror: "none" },
+    },
+    {
+      id: "near",
+      symbolId: "resistor",
+      placement: { position: { x: 0, y: 0 }, rotation: 0, mirror: "none" },
+    },
+  ];
+  const context = deriveNetConnectivityContext(document, customResolver);
+  const path = [
+    { x: -100, y: 0 },
+    { x: 100, y: 0 },
+  ];
+  const indexed = createRouteClearance(document, customResolver, context, {
+    logicalIds: new Set(),
+    endpointKeys: new Set(),
+    exhaustive: false,
+  }).conflict(path, []);
+  const exhaustive = createRouteClearance(document, customResolver, context, {
+    logicalIds: new Set(),
+    endpointKeys: new Set(),
+    exhaustive: true,
+  }).conflict(path, []);
+  expect(indexed).toBe(exhaustive);
+  expect(indexed).toContain("passes through near");
+});
