@@ -186,8 +186,8 @@ test("blocks destructive browser refresh shortcuts while work is unsaved", async
 
   // Once an equally safe copy exists — here the exported Project file, the
   // same stamp a gallery publish leaves — the guards stand down: refresh is
-  // no longer intercepted and File > New Project proceeds without the
-  // unsaved-changes dialog.
+  // no longer intercepted and replacing the drawing via Import -> Project
+  // File… proceeds without the unsaved-changes dialog.
   const download = page.waitForEvent("download");
   await clickCommand(page, "File", "Export Project File…");
   await download;
@@ -196,10 +196,16 @@ test("blocks destructive browser refresh shortcuts while work is unsaved", async
   await canvas.click({ position: { x: 60, y: 60 } });
   await page.keyboard.press("Control+r");
   await expect(status).not.toHaveText(blocked);
-  await clickCommand(page, "File", "New Project");
+  await openProjectFile(
+    page,
+    createEmptyProject("project-replacement", "Replacement"),
+  );
   await expect(
     page.getByRole("dialog", { name: "Unsaved changes" }),
   ).toHaveCount(0);
+  await expect(page.locator(".app-project-name-text")).toHaveText(
+    "Replacement",
+  );
   await expect(page.locator('[data-canvas-hit-kind="instance"]')).toHaveCount(
     0,
   );

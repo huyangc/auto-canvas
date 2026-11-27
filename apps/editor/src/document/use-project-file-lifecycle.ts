@@ -831,7 +831,8 @@ export function useProjectFileLifecycle({
     asNew: boolean,
     deadlineMs?: number,
   ): Promise<CloudProjectSaveOutcome> {
-    return trackCloudWrite(
+    const boundWrite = !asNew && cloudBindingRef.current !== null;
+    const operation = trackCloudWrite(
       saveCoordinator.save({
         sessionId,
         current: () =>
@@ -843,8 +844,11 @@ export function useProjectFileLifecycle({
         asNew,
         write: (snapshot) => {
           const writing = performProjectSaveToCloud(snapshot, asNew);
-          if (deadlineMs === undefined) return writing;
-          const binding = asNew ? null : cloudBindingRef.current;
+          // Only bound PUT writes (protected by If-Match revision checks)
+          // release the coordinator at the deadline; unbound POST creates stay
+          // held in the coordinator so a retry never issues a duplicate POST.
+          if (deadlineMs === undefined || !boundWrite) return writing;
+          const binding = cloudBindingRef.current;
           const epochAtStart = onlineEpoch();
           let deadline: ReturnType<typeof setTimeout> | undefined;
           const expired = new Promise<CloudProjectSaveOutcome>((resolve) => {
@@ -887,6 +891,24 @@ export function useProjectFileLifecycle({
           return { status: "rejected", message };
         },
       }),
+    );
+    if (deadlineMs === undefined || boundWrite) return operation;
+    // Unbound POST create: bound the caller's wait so close controls never
+    // hang, while keeping `operation` active in saveCoordinator so a retry
+    // cannot trigger a second POST while the first create is still pending.
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<CloudProjectSaveOutcome>((resolve) => {
+      deadline = setTimeout(() => {
+        resolve({
+          status: "rejected",
+          message:
+            "The Cloud has not answered the initial save yet. Wait for it to finish, or check Cloud Projects before closing.",
+        });
+      }, deadlineMs);
+    });
+    operation.catch(() => {});
+    return Promise.race([operation, expired]).finally(() =>
+      clearTimeout(deadline),
     );
   }
 

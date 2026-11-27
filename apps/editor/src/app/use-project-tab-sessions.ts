@@ -402,6 +402,7 @@ interface ProjectTabSessionsOptions {
   isDirtyWork: ProjectFileLifecycle["isDirtyWork"];
   hasUnsafeWork: ProjectFileLifecycle["hasUnsafeWork"];
   isSaveInFlight: ProjectFileLifecycle["isSaveInFlight"];
+  isUserSaveInFlight: ProjectFileLifecycle["isUserSaveInFlight"];
   restoreSavedProjectBaseline: ProjectFileLifecycle["restoreSavedProjectBaseline"];
   hasExplicitBootTarget: boolean;
   getCurrentInteractionState: InteractionState["getCurrentState"];
@@ -498,6 +499,7 @@ export function useProjectTabSessions({
   isDirtyWork,
   hasUnsafeWork,
   isSaveInFlight,
+  isUserSaveInFlight,
   restoreSavedProjectBaseline,
   hasExplicitBootTarget,
   getCurrentInteractionState,
@@ -1333,6 +1335,9 @@ export function useProjectTabSessions({
   }
   const [closingSaveBusy, setClosingSaveBusy] = useState(false);
   const closingSaveInFlight = useRef(false);
+  // Tracks unbound background POST creates still awaiting a server response
+  // after a close deadline, so retrying never issues a duplicate POST.
+  const pendingBackgroundCreates = useRef(new Set<string>());
 
   async function saveSingleTabForClose(
     tabId: string,
@@ -1351,6 +1356,12 @@ export function useProjectTabSessions({
             ok: false,
             message:
               "Apply or discard your code draft before saving and closing.",
+          };
+        if (isUserSaveInFlight())
+          return {
+            ok: false,
+            message:
+              "A Cloud save is already in progress; wait for it to finish before closing.",
           };
         const outcome = await saveProjectToCloud(undefined, false, {
           deadlineMs: CLOUD_AUTO_SAVE_DEADLINE_MS,
@@ -1371,6 +1382,13 @@ export function useProjectTabSessions({
         };
       }
       const startBinding = entry.session.file.cloudBinding;
+      const sessionKey = entry.session.controller.projectSessionId;
+      if (!startBinding && pendingBackgroundCreates.current.has(sessionKey))
+        return {
+          ok: false,
+          message:
+            "An initial Cloud save of this tab is still in progress; wait for it to finish or check Cloud Projects before closing.",
+        };
       const activeBinding = projectTabs
         .entries()
         .find((item) => item.id === projectTabs.currentId())?.session
@@ -1393,6 +1411,7 @@ export function useProjectTabSessions({
       try {
         const controller = entry.session.controller;
         const candidate = controller.project;
+        if (!startBinding) pendingBackgroundCreates.current.add(sessionKey);
         const findLive = () =>
           projectTabs
             .entries()
@@ -1528,6 +1547,8 @@ export function useProjectTabSessions({
         let settled = false;
         const finishing = finish().finally(() => {
           settled = true;
+          if (!startBinding)
+            pendingBackgroundCreates.current.delete(sessionKey);
         });
         finishing.catch(() => {});
         let deadline: ReturnType<typeof setTimeout> | undefined;
@@ -1555,8 +1576,9 @@ export function useProjectTabSessions({
             }
             resolve({
               ok: false,
-              message:
-                "The Cloud did not answer in time; the Project may have been saved. Retry, or close without saving.",
+              message: startBinding
+                ? "The Cloud did not answer in time; the Project may have been saved. Retry, or close without saving."
+                : "The Cloud has not answered the initial save yet. Wait for it to finish, or check Cloud Projects before closing.",
             });
           }, CLOUD_AUTO_SAVE_DEADLINE_MS);
         });
@@ -1570,6 +1592,9 @@ export function useProjectTabSessions({
       }
     }
     // Local-only mode (no Cloud Project store): export as .icproj.json.
+    // Only a confirmed filesystem write ("saved") establishes a safe copy;
+    // a browser "download-requested" keeps dirty/unsafe state intact until
+    // the user verifies the download and confirms closing.
     try {
       const candidate = entry.session.controller.project;
       const fileName = `${projectFileBaseName(candidate.name)}.icproj.json`;
@@ -1585,17 +1610,19 @@ export function useProjectTabSessions({
           message: "Export cancelled; the tab stayed open.",
         };
       }
-      setStatus(
-        result.status === "saved"
-          ? `Exported: ${fileName}`
-          : `Export requested: ${fileName}`,
-      );
+      if (result.status !== "saved") {
+        setStatus(`Export requested: ${fileName}`);
+        return {
+          ok: false,
+          message: `Export requested (${fileName}). Verify the downloaded file, then choose Close without saving if ready.`,
+        };
+      }
+      setStatus(`Exported: ${fileName}`);
       const live = projectTabs.entries().find((item) => item.id === tabId);
       if (
         live &&
         sameProjectContent(live.session.controller.project, candidate)
       ) {
-        live.session.dirty = false;
         live.session.unsafe = false;
         projectTabs.changed();
         return { ok: true, snapshot: candidate };
