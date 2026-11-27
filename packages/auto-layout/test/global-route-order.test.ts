@@ -1,6 +1,8 @@
 import { expect, it, vi } from "vitest";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { visibleInstanceBounds, resolveRouteGeometry } from "@icm/derived";
+import { routeEndpoints } from "@icm/model";
+import { planWireBatch } from "@icm/edit-engine";
 import * as ordering from "../src/global-route-order.js";
 import {
   compareNetSpans,
@@ -339,4 +341,161 @@ it("rejects an APR move that swaps one violated alignment for another", () => {
   expect(aprGuardsRegressed(doc, next, resolver)).toBe(true);
   expect(aprGuardsRegressed(next, doc, resolver)).toBe(true);
   expect(aprGuardsRegressed(next, structuredClone(next), resolver)).toBe(false);
+});
+
+it.each([6, 41])(
+  "preserves drawn MOS body leads when finalist rail rerouting runs on %i devices",
+  (count) => {
+    const doc = drawing(
+      count === 6
+        ? [
+            [240, 60, 0],
+            [180, 420, 90],
+            [360, 240, 0],
+            [240, 240, 90],
+            [0, 60, 90],
+            [120, 240, 90],
+          ]
+        : [
+            [360, 300, 0],
+            [120, 120, 90],
+            [360, 120, 0],
+            [120, 60, 90],
+            [240, 0, 0],
+            [60, 420, 0],
+          ],
+    );
+    addSupplyAndDevices(doc, count);
+    doc.instances.push({
+      id: "Q",
+      symbolId: "pmos",
+      placement: placement(400, 500),
+    });
+    const bodyWire = planWireBatch(
+      doc,
+      resolver,
+      {
+        id: "seed-body-lead",
+        from: {
+          kind: "endpoint",
+          endpoint: { kind: "terminal", instanceId: "Q", pinName: "B" },
+        },
+        to: {
+          kind: "endpoint",
+          endpoint: { kind: "terminal", instanceId: "a", pinName: "1" },
+        },
+      },
+      100,
+      { keepClear: true, netScope: "base" },
+    );
+    if (typeof bodyWire === "string") throw Error(bodyWire);
+    const input = preview(doc, resolver, bodyWire.edits);
+    if (!input.ok) throw Error("cannot seed MOS body lead");
+    const hasBodyLead = (d: typeof doc) =>
+      d.routes.some((r) =>
+        routeEndpoints(r).some(
+          (end) =>
+            end?.kind === "terminal" &&
+            end.instanceId === "Q" &&
+            end.pinName === "B",
+        ),
+      );
+    expect(hasBodyLead(input.document)).toBe(true);
+    const railPass = vi.spyOn(reroutes, "rerouteRailCrossings");
+    try {
+      const result = planAutoLayout(input.document, resolver, {
+        fixedInstanceIds: new Set(input.document.instances.map((i) => i.id)),
+        search: { seed: 1, evaluations: 1 },
+      });
+      expect(railPass).toHaveBeenCalledTimes(1);
+      const final = preview(input.document, resolver, result.edits);
+      if (!final.ok) throw Error("invalid finalist replay");
+      expect(hasBodyLead(final.document)).toBe(true);
+      expect(auditRouting(final.document, resolver)).toMatchObject({
+        crossings: 0,
+        unsafeProblems: [],
+      });
+      expect(missingConnections(final.document, resolver)).toBe(0);
+      expect(terminalPartition(final.document, resolver)).toBe(
+        terminalPartition(input.document, resolver),
+      );
+      // Direct rerouteRailCrossings without a body-redrawing finisher must also
+      // refuse any candidate that erases an existing MOS body lead.
+      const prior = railPass.mock.calls[0]![2];
+      const direct = reroutes.rerouteRailCrossings(
+        input.document,
+        resolver,
+        prior,
+        () => false,
+        (r) => r,
+      );
+      const directReplay = preview(input.document, resolver, direct.edits);
+      if (!directReplay.ok) throw Error("invalid direct rail replay");
+      expect(hasBodyLead(directReplay.document)).toBe(true);
+    } finally {
+      railPass.mockRestore();
+    }
+  },
+);
+
+it("stops an optional negotiated rebuild when its deadline expires while keeping fallback routing intact", () => {
+  const doc = drawing([
+    [240, 420, 90],
+    [360, 240, 0],
+    [360, 60, 0],
+    [300, 300, 0],
+    [0, 120, 90],
+    [120, 420, 90],
+  ]);
+  const groups = freezePinGroups(doc, resolver),
+    roles = classifyNets(doc, resolver);
+  const aborted = routeDocument(
+    doc,
+    resolver,
+    groups,
+    roles,
+    [],
+    true,
+    { ripUp: true, negotiated: true },
+    new Set(),
+    { seed: 1, evaluations: 1, deadline: 0 },
+  );
+  expect(aborted.problem).toBe("aborted");
+  expect(aborted.edits).toEqual([]);
+  const controller = new AbortController();
+  let checks = 0;
+  const signal = {
+    get aborted() {
+      checks++;
+      if (checks >= 3) controller.abort();
+      return controller.signal.aborted;
+    },
+  } as AbortSignal;
+  const midPass = routeDocument(
+    doc,
+    resolver,
+    groups,
+    roles,
+    [],
+    true,
+    { ripUp: true, negotiated: true },
+    new Set(),
+    { seed: 1, evaluations: 1, signal },
+  );
+  expect(midPass.problem).toBe("aborted");
+  const routedNets = new Set(midPass.document.routes.map((r) => r.netId));
+  expect(routedNets.size).toBeLessThan(groups.length);
+  const fallback = routeDocument(
+    doc,
+    resolver,
+    groups,
+    roles,
+    [],
+    true,
+    { ripUp: true },
+    new Set(),
+    { seed: 1, evaluations: 1, deadline: 0 },
+  );
+  expect(fallback.problem).toBeUndefined();
+  expect(missingConnections(fallback.document, resolver)).toBe(0);
 });
