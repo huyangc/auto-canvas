@@ -16,6 +16,7 @@ import { recoverDraftingOwners } from "../src/recover-drafting-owners.js";
 import { draftingGroups } from "../src/drafting-groups.js";
 import { pinPoints, placement } from "../src/geometry.js";
 import { planAutoLayout } from "../src/index.js";
+import { readabilityMetrics } from "../src/readability-metrics.js";
 import {
   equivalentTerminals,
   preview,
@@ -157,6 +158,59 @@ it("reseats a small caption left outside its owner radius by ordinary R150", () 
     id: "b",
   });
 });
+
+it("follows and recovers a free device caption above 40 instances", () => {
+  const count = 42;
+  const d = circuit(
+    Object.fromEntries(
+      Array.from({ length: count }, (_, i) => [`r${i}`, "resistor"]),
+    ),
+    {},
+  );
+  for (const [i, instance] of d.instances.entries())
+    instance.placement = placement(i * 100, 400, "none", 270);
+  const owner = d.instances.at(-1)!;
+  const original = { x: owner.placement!.position.x, y: 440 };
+  d.drafting = { objects: [note("caption", original)] };
+  const expectOwned = (layout: typeof d) => {
+    expect(draftingGroups(layout, resolver)[0]!.owner).toMatchObject({
+      kind: "instance",
+      id: owner.id,
+    });
+    expect(
+      readabilityMetrics(layout, resolver, "weighted").unownedDrafting
+        .violations,
+    ).toBe(0);
+  };
+  expectOwned(d);
+  const quick = planAutoLayout(d, resolver, {
+    search: { seed: 1, evaluations: 0 },
+  });
+  const stranded = preview(d, resolver, quick.edits);
+  if (!stranded.ok) throw Error(JSON.stringify(stranded.diagnostics));
+  expect(draftingGroups(stranded.document, resolver)[0]!.owner).toBeUndefined();
+
+  const bounded = planAutoLayout(d, resolver, {
+    search: { seed: 1, evaluations: 2 },
+  });
+  const recovered = recoverDraftingOwners(d, resolver, quick);
+  for (const plan of [bounded, recovered]) {
+    expect(plan.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    const final = preview(d, resolver, plan.edits);
+    if (!final.ok) throw Error(JSON.stringify(final.diagnostics));
+    expectOwned(final.document);
+    expect(
+      resolveVisualAnchor(
+        final.document,
+        resolver,
+        final.document.drafting!.objects[0]!.anchor,
+      ).position,
+    ).not.toEqual(original);
+    expect(terminalPartition(final.document, resolver)).toBe(
+      terminalPartition(d, resolver),
+    );
+  }
+}, 60_000);
 
 it("continues beyond a blocked local seat and keeps the stranded caption's owner", async () => {
   const { followDraftingGroups } =

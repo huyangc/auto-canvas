@@ -261,6 +261,10 @@ function placePowerMarkers(
   roles: NetRoles,
   targets: Map<string, Placement>,
   fixed: ReadonlySet<string>,
+  problem: (
+    document: SchematicDocument,
+    resolver: SymbolResolver,
+  ) => string | undefined = geometryProblem,
 ) {
   const grid = document.presentation.grid;
   const contacts = touchingPins(document, resolver);
@@ -305,7 +309,7 @@ function placePowerMarkers(
   );
   const placed: Instance[] = [];
   const free = (i: Instance) =>
-    !geometryProblem(
+    !problem(
       withPlacements(
         {
           ...document,
@@ -502,6 +506,10 @@ function placeCellPins(
   edgeOnly: ReadonlySet<string> = new Set(),
   frozen: ReadonlySet<string> = new Set(),
   localHosts = localPortHosts(document, resolver, roles, pins),
+  problem: (
+    document: SchematicDocument,
+    resolver: SymbolResolver,
+  ) => string | undefined = geometryProblem,
 ) {
   const grid = document.presentation.grid;
   const placed = new Set(frozen);
@@ -694,7 +702,7 @@ function placeCellPins(
         continue;
       targets.set(entry.i.id, p);
       if (
-        !geometryProblem(
+        !problem(
           withPlacements({ ...document, instances: occupied }, targets),
           resolver,
         )
@@ -788,7 +796,7 @@ function placeCellPins(
           !prior.some(
             (other) =>
               other.id !== entry.i.id &&
-              geometryProblem(
+              problem(
                 withPlacements(
                   { ...document, instances: [other, entry.i] },
                   targets,
@@ -992,6 +1000,10 @@ export function placeMarkers(
   overrides: LayoutOverrides,
   choices: LayoutChoices,
   fixed: ReadonlySet<string> = new Set(),
+  problem: (
+    document: SchematicDocument,
+    resolver: SymbolResolver,
+  ) => string | undefined = geometryProblem,
 ): void {
   const devices = document.instances
     .filter((i) => !isMarker(i))
@@ -1018,6 +1030,7 @@ export function placeMarkers(
     roles,
     targets,
     fixed,
+    problem,
   );
   const fixedPorts = new Set(
     document.instances
@@ -1040,6 +1053,8 @@ export function placeMarkers(
     choices,
     new Set(),
     fixedPorts,
+    undefined,
+    problem,
   );
 }
 

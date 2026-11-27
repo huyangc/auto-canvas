@@ -32,7 +32,7 @@ import { generateCompacted2DCandidates } from "./compact-2d.js";
 import { generateFoldedCandidates, layoutAspectMetrics } from "./pack-rows.js";
 import {
   improvesReadability,
-  readabilityTerm,
+  unboundedReadabilityTerm,
 } from "./readability-selection.js";
 import { localRailMarkers } from "./local-rail-markers.js";
 import { netlistPresentation } from "./netlist-presentation.js";
@@ -614,12 +614,12 @@ function reshapeFinalist(
   const rail = railCrossingMetrics(final, resolver, roles.rails).violations;
   const guards = routedGuards(final, resolver);
   const leads = drawnBodyLeads(final, resolver);
-  const score = readabilityTerm(final, resolver);
+  const score = unboundedReadabilityTerm(final, resolver);
   const symmetryViolations =
     mode === "compact" ? netlistSymmetry(final, resolver).violations : 0;
   const seatedContacts =
     mode === "compact" ? touchingPins(final, resolver) : [];
-  const passing: { run: LayoutRun; rank: number[] }[] = [];
+  const passing: { run: LayoutRun; rank: [number] }[] = [];
   for (const devices of candidates) {
     if (stopped()) break;
     const trial = planLayoutOnce(
@@ -701,43 +701,31 @@ function reshapeFinalist(
       afterRail > rail
     )
       continue;
-    const next = readabilityTerm(after, resolver);
+    const next = unboundedReadabilityTerm(after, resolver);
     const noExtraCrossings = audit.crossings <= baseline.crossings;
     if (
       !noExtraCrossings &&
-      !(
-        mode === "fold" &&
-        source.instances.length <= 40 &&
-        next < score &&
-        next <= score * 0.95
-      )
+      !(mode === "fold" && next < score && next <= score * 0.95)
     )
       continue;
     const squarer = area.layout.elongation <= before.layout.elongation * 0.78;
     const improved =
       mode === "compact"
-        ? source.instances.length <= 40
-          ? next < score && area.layout.area <= before.layout.area
-          : area.layout.area < before.layout.area * 0.98 &&
-            audit.wireLength <= baseline.wireLength * 1.02 &&
-            audit.bends <= baseline.bends * 1.05
-        : source.instances.length <= 40
-          ? next < score ||
-            (next <= score * 1.02 &&
-              noExtraCrossings &&
-              area.layout.area <= before.layout.area * 1.02 &&
-              squarer) ||
-            (before.layout.aspectRatio >= 3 &&
-              noExtraCrossings &&
-              area.layout.elongation <= 1.65 &&
-              area.layout.area <= before.layout.area * 1.15 &&
-              audit.wireLength <= baseline.wireLength * 1.08 &&
-              next <= score + 3000)
-          : noExtraCrossings &&
-            (area.layout.area < before.layout.area ||
-              (area.layout.area <= before.layout.area * 1.05 &&
-                squarer &&
-                audit.wireLength <= baseline.wireLength * 1.1));
+        ? next < score &&
+          (area.layout.area <= before.layout.area ||
+            (audit.crossings < baseline.crossings &&
+              area.layout.area <= before.layout.area * 1.02))
+        : next < score ||
+          (next <= score * 1.02 &&
+            noExtraCrossings &&
+            area.layout.area <= before.layout.area * 1.02 &&
+            squarer) ||
+          (before.layout.aspectRatio >= 3 &&
+            noExtraCrossings &&
+            area.layout.elongation <= 1.65 &&
+            area.layout.area <= before.layout.area * 1.15 &&
+            audit.wireLength <= baseline.wireLength * 1.08 &&
+            next <= score + 3000);
     if (
       !improved ||
       (mode === "compact" &&
@@ -764,27 +752,14 @@ function reshapeFinalist(
     }
     passing.push({
       run: { ...trial, result: candidate, final: after },
-      rank:
-        source.instances.length <= 40
-          ? [next]
-          : [
-              audit.crossings,
-              afterRail,
-              area.layout.area,
-              mode === "compact" ? audit.wireLength : area.layout.elongation,
-            ],
+      rank: [next],
     });
   }
-  const [best] = passing.sort((a, b) => {
-    for (const [i, value] of a.rank.entries()) {
-      const difference = value - b.rank[i]!;
-      if (difference) return difference;
-    }
-    return 0;
-  });
+  const [best] = passing.sort((a, b) => a.rank[0] - b.rank[0]);
   if (!best || stopped()) return incumbent;
   carryPartitionDiagnostics(incumbent, best.run.result);
   retainRefinementMetrics(best.run, incumbent, resolver);
+  if (stopped()) return incumbent;
   return best.run.result;
 }
 
@@ -1365,7 +1340,10 @@ function selectFinalLayout(
     (options.search?.deadline !== undefined &&
       Date.now() >= options.search.deadline);
   const recover = () =>
-    !finalists ||
+    !(
+      finalists ||
+      (document.instances.length > 40 && (options.search?.evaluations ?? 0) > 0)
+    ) ||
     options.partition ||
     options.quality === "optimized" ||
     stopped()
@@ -1632,7 +1610,8 @@ function planWithBranches(
     options.partition ||
     options.quality === "optimized" ||
     !document.instances.length ||
-    document.instances.length > 40 ||
+    (document.instances.length > 40 &&
+      !((options.search?.evaluations ?? 0) > 0)) ||
     !document.drafting?.objects.some((o) => !o.locked)
   )
     return planWithFixedDrafting(document, resolver, options, allowBranches);
@@ -1740,6 +1719,8 @@ function planWithBranches(
             floatingPins(candidate.final, resolver).length >
               floatingPins(placed.document, resolver).length))
       ) {
+        if (document.instances.length > 40)
+          return followDraftingGroups(document, resolver, base, base, groups);
         const fallback = timePhase("draftingFallback", () =>
           planWithFixedDrafting(stripped, resolver, options, allowBranches),
         );
@@ -1759,7 +1740,7 @@ function planWithBranches(
           resolver,
           base,
           base,
-          ownedGroups,
+          document.instances.length > 40 ? groups : ownedGroups,
         );
       return followDraftingGroups(
         document,
