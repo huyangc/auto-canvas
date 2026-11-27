@@ -1165,9 +1165,11 @@ export function routeDocument(
   const stopped = () =>
     !!search?.signal?.aborted ||
     (search?.deadline !== undefined && Date.now() >= search.deadline);
+  // An explicitly negotiated finalist trial exits immediately when its deadline
+  // expires instead of falling through into the unguarded ordinary rip-up sweep.
+  if (options.negotiated && stopped()) return best;
   // The quick result is the required fallback even for an already aborted search.
-  const negotiated =
-    options.negotiated && search?.evaluations !== 0 && !stopped();
+  const negotiated = options.negotiated && search?.evaluations !== 0;
   const clearedGroups = (groups: PinGroup[]) => {
     const cut = groups.flatMap((group) => removals.get(group) ?? []);
     if (!cut.length) return;

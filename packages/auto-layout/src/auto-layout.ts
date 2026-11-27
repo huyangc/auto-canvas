@@ -524,7 +524,16 @@ function routeSelectedFinalist(
   );
   const acceptFinishedSignals = (candidate: AutoLayoutResult) => {
     const safeRaw = keepIntactReroute(source, resolver, incumbent, candidate);
-    const finished = finishLabels(safeRaw);
+    const finished = finishLabels(
+      withDraftingTranslation(
+        {
+          ...safeRaw,
+          edits: [...safeRaw.edits],
+          diagnostics: [...safeRaw.diagnostics],
+        },
+        draftingTranslation(safeRaw),
+      ),
+    );
     const after = finishedDocument(source, resolver, finished);
     if (!after) return safeRaw;
     const beforeGuards = routedGuards(final, resolver);
@@ -549,6 +558,12 @@ function routeSelectedFinalist(
       ? incumbent
       : acceptFinishedSignals(rawSignals);
   const routed = finishedDocument(source, resolver, signals);
+  if (signals !== incumbent && routed)
+    retainRefinementMetrics(
+      { result: signals, final: routed, choices: emptyChoices() },
+      incumbent,
+      resolver,
+    );
   if (
     !routed ||
     stopped() ||
@@ -557,12 +572,22 @@ function routeSelectedFinalist(
       .violations
   )
     return signals;
-  return keepIntactReroute(
+  const railed = keepIntactReroute(
     source,
     resolver,
     signals,
     rerouteRailCrossings(source, resolver, signals, stopped, finishLabels),
   );
+  if (railed !== signals) {
+    const railedDoc = finishedDocument(source, resolver, railed);
+    if (railedDoc)
+      retainRefinementMetrics(
+        { result: railed, final: railedDoc, choices: emptyChoices() },
+        signals,
+        resolver,
+      );
+  }
+  return railed;
 }
 
 function negotiateFinalist(
@@ -638,6 +663,22 @@ function negotiateFinalist(
     keepIntactReroute(source, resolver, result, candidate) !== candidate
   )
     return before;
+  const partitionDiagnostics = result.diagnostics.filter(
+    (d) =>
+      d.rule === "partition" || d.code === "AUTO_LAYOUT_PARTITION_FALLBACK",
+  );
+  if (partitionDiagnostics.length) {
+    const existing = new Set(
+      candidate.diagnostics.map((d) => `${d.code}:${d.message}`),
+    );
+    for (const diagnostic of partitionDiagnostics) {
+      const key = `${diagnostic.code}:${diagnostic.message}`;
+      if (!existing.has(key)) {
+        candidate.diagnostics.push(diagnostic);
+        existing.add(key);
+      }
+    }
+  }
   retainRefinementMetrics(run, result, resolver);
   return run;
 }
