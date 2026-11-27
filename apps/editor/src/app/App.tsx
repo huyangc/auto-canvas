@@ -5047,6 +5047,7 @@ function WorkspaceEditor({
     isDirtyWork,
     hasUnsafeWork,
     isSaveInFlight,
+    isUserSaveInFlight,
     restoreSavedProjectBaseline,
     hasExplicitBootTarget,
     getCurrentInteractionState,
