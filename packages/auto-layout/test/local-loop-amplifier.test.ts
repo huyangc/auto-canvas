@@ -609,7 +609,7 @@ it.each([false])(
   60_000,
 );
 
-it("finishes runner and local-loop finalists at full budget and reuses identical finalists", () => {
+it("finishes runner and local-loop finalists at full budget and the attachment variant at half budget", () => {
   const { d } = regulator();
   // Keep R168 out of the R156 finalist budget comparison.
   const eligible = vi
@@ -632,17 +632,19 @@ it("finishes runner and local-loop finalists at full budget and reuses identical
     const result = planAutoLayout(d, resolver);
     expect(rank).toHaveBeenCalledTimes(1);
     expect(rank.mock.calls[0]![0].available.size).toBeGreaterThan(1);
-    // All three alternates enter selection; identical finalists reuse their
-    // polished cache while distinct non-attachment finalists keep full budget.
+    // Incumbent, runner and local loop keep main's full budgets; only the
+    // T079 attachment variant is finished at half budget.
     expect(rank.mock.results[0]!.value).toEqual([
       "runner",
       "localLoop",
       "attachment",
     ]);
     expect(choose).toHaveBeenCalledTimes(3);
-    expect(relocationLimits).toEqual([10, 10, 10]);
-    expect(portSearch.mock.calls.map((call) => call[5])).toEqual([12, 12, 12]);
-    expect(railSearch.mock.calls.map((call) => call[5])).toEqual([8, 8, 8]);
+    expect(relocationLimits).toEqual([10, 10, 10, 5]);
+    expect(portSearch.mock.calls.map((call) => call[5])).toEqual([
+      12, 12, 12, 6,
+    ]);
+    expect(railSearch.mock.calls.map((call) => call[5])).toEqual([8, 8, 8, 4]);
     expect(result.diagnostics.some((d) => d.severity === "error")).toBe(false);
     expect(planAutoLayout(d, resolver)).toEqual(result);
   } finally {
