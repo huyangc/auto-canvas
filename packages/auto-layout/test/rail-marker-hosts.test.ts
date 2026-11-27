@@ -728,4 +728,48 @@ describe("T127 rail markers sit at the pin they serve", () => {
     expect(missingConnections(routed.document, resolver)).toBe(0);
     expect(floatingPins(routed.document, resolver)).toEqual([]);
   });
+
+  it("nudges a movable ground marker past a fixed ground marker sharing the same MOS source", () => {
+    const document = circuit(
+      { M1: "nmos", g1: "ground", g2: "ground" },
+      { rail: ["M1.S", "g1.0", "g2.0"] },
+    );
+    nameGround(document);
+    document.instances.find((i) => i.id === "M1")!.placement = placement(
+      200,
+      200,
+    );
+    // g1 is fixed directly on the default seat below M1.S (220, 260 -> 220, 280).
+    const sourcePin = point(document, "M1", "S");
+    document.instances.find((i) => i.id === "g1")!.placement = placement(
+      sourcePin.x,
+      sourcePin.y + 20,
+    );
+    const result = planAutoLayout(document, resolver, {
+      fixedInstanceIds: new Set(["M1", "g1"]),
+      search: { evaluations: 0, seed: 1 },
+    });
+    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual(
+      [],
+    );
+    expect(result.edits.length).toBeGreaterThan(0);
+    const after = executeTransaction(
+      document,
+      {
+        transactionId: "fixed-shared-ground",
+        documentId: document.id,
+        expectedRevision: document.revision,
+        actor: { kind: "agent", id: "test" },
+        edits: result.edits,
+      },
+      { symbolResolver: resolver },
+    );
+    expect(after.ok).toBe(true);
+    if (!after.ok) throw new Error("transaction failed");
+    expect(point(after.document, "g2", "0")).not.toEqual(
+      point(after.document, "g1", "0"),
+    );
+    expect(missingConnections(after.document, resolver)).toBe(0);
+    expect(floatingPins(after.document, resolver)).toEqual([]);
+  });
 });
