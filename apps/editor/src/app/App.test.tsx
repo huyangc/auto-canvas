@@ -124,10 +124,12 @@ describe("editor shell", () => {
     expect(markup).not.toContain('data-testid="circuit-menu"');
     expect(markup).not.toContain("<summary>Edit</summary>");
     expect(markup).not.toContain("<summary>Circuit</summary>");
-    // The project's name is in the top bar, read-only; it opens Project Info.
+    // The project's name is in the top bar and clicks to rename in place; + New
+    // sits beside the mode switch.
     expect(markup).toMatch(
-      /<button type="button" class="app-project-name"[^>]*><span class="app-project-name-text">Smoke Project<\/span><\/button>/u,
+      /<button type="button" class="app-project-name"[^>]*><span class="app-project-name-text">Smoke Project<\/span><svg class="app-project-name-edit-icon"/u,
     );
+    expect(markup).toContain('data-testid="new-project-button"');
     const actionRowStart = markup.indexOf('class="app-chrome-actions"');
     const actionRowEnd = markup.indexOf(
       '<div class="toolbar-row',

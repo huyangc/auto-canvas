@@ -4972,6 +4972,8 @@ function WorkspaceEditor({
     setWorkspaceReopen,
     reopenClosedWindowTabs,
     cloudManagementBusy,
+    closingSaveBusy,
+    saveAndCloseTabs,
     isCloudManagementInFlight,
     renameShelfProject,
     deleteShelfProject,
@@ -4980,6 +4982,8 @@ function WorkspaceEditor({
     noteAgentCommit,
   } = useProjectTabSessions({
     openProjectFile,
+    saveProjectToCloud,
+    exportDelivery,
     projectStore,
     currentCloudProjects,
     onCloudProjectSaved: noteCloudProjectSaved,
@@ -5240,6 +5244,8 @@ function WorkspaceEditor({
         projectNameEditing={projectNameEditing}
 
         cloudManagementBusy={cloudManagementBusy}
+        closingSaveBusy={closingSaveBusy}
+        saveAndCloseTabs={saveAndCloseTabs}
         savedProjectBaseline={savedProjectBaseline}
         isDirtyWork={isDirtyWork}
         hasUnsavedChanges={hasUnsavedChanges}

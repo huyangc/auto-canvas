@@ -9,7 +9,12 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 // jsdom lays nothing out; the strip scrolls its selected tab into view.
 Element.prototype.scrollIntoView = () => {};
 
-const tab = (id: string, name = id, dirty = false) => ({ id, name, dirty });
+const tab = (
+  id: string,
+  name = id,
+  dirty = false,
+  cloudId: string | null = null,
+) => ({ id, name, dirty, cloudId });
 
 function props(
   tabs: ComponentProps<typeof ProjectTabs>["tabs"],
@@ -161,5 +166,154 @@ describe("ProjectTabs", () => {
     expect(
       view.host.querySelector('button[aria-label="Open Cloud Project…"]'),
     ).toBeNull();
+  });
+
+  it("auto-saves dirty Cloud-bound tabs on close and prompts only when saving fails", async () => {
+    const onSaveAndClose = vi
+      .fn<
+        (ids: readonly string[]) => Promise<{ closed: boolean; error?: string }>
+      >()
+      .mockResolvedValueOnce({ closed: true });
+    const two = {
+      ...props([tab("a", "Alpha", true, "cloud-a"), tab("b", "Beta")]),
+      onSaveAndClose,
+    };
+    const view = await mount(two);
+    const decision = () =>
+      view.host.querySelector<HTMLElement>(
+        '[data-testid="project-tab-close-decision"]',
+      );
+
+    // Dirty + Cloud-bound: closes via incremental save without prompting.
+    await act(async () =>
+      view.host
+        .querySelector<HTMLButtonElement>('[data-tab-close="a"]')!
+        .click(),
+    );
+    expect(onSaveAndClose).toHaveBeenCalledWith(["a"]);
+    expect(decision()).toBeNull();
+
+    // When incremental save fails, keeps the tab open and shows error + 3 actions.
+    onSaveAndClose.mockResolvedValueOnce({
+      closed: false,
+      error: "Cloud is offline",
+    });
+    await act(async () =>
+      view.host
+        .querySelector<HTMLButtonElement>('[data-tab-close="a"]')!
+        .click(),
+    );
+    await vi.waitFor(() =>
+      expect(decision()?.textContent).toContain("Cloud is offline"),
+    );
+    expect(decision()?.textContent).toContain("Save & close");
+    expect(decision()?.textContent).toContain("Close without saving");
+    expect(decision()?.textContent).toContain("Keep open");
+
+    // Retrying Save & close succeeds and dismisses the decision.
+    onSaveAndClose.mockResolvedValueOnce({ closed: true });
+    const saveButton = [...decision()!.querySelectorAll("button")].find(
+      (item) => item.textContent === "Save & close",
+    )!;
+    await act(async () => saveButton.click());
+    expect(onSaveAndClose).toHaveBeenLastCalledWith(["a"]);
+    await vi.waitFor(() => expect(decision()).toBeNull());
+  });
+
+  it("offers 3-way Save/Export & close for dirty unbound tabs", async () => {
+    const onSaveAndClose = vi.fn(async () => ({ closed: true }));
+    const two = {
+      ...props([tab("a", "Alpha", true, null), tab("b", "Beta")]),
+      onSaveAndClose,
+    };
+    const view = await mount(two);
+    const decision = () =>
+      view.host.querySelector<HTMLElement>(
+        '[data-testid="project-tab-close-decision"]',
+      );
+
+    await act(async () =>
+      view.host
+        .querySelector<HTMLButtonElement>('[data-tab-close="a"]')!
+        .click(),
+    );
+    await vi.waitFor(() =>
+      expect(decision()?.textContent).toContain("Save & close"),
+    );
+    expect(onSaveAndClose).not.toHaveBeenCalled();
+
+    const saveButton = [...decision()!.querySelectorAll("button")].find(
+      (item) => item.textContent === "Save & close",
+    )!;
+    await act(async () => saveButton.click());
+    expect(onSaveAndClose).toHaveBeenCalledWith(["a"]);
+    await vi.waitFor(() => expect(decision()).toBeNull());
+
+    // Local-only mode offers Export & close instead of Save & close.
+    onSaveAndClose.mockClear();
+    await view.render({ ...two, cloudEnabled: false });
+    await act(async () =>
+      view.host
+        .querySelector<HTMLButtonElement>('[data-tab-close="a"]')!
+        .click(),
+    );
+    await vi.waitFor(() =>
+      expect(decision()?.textContent).toContain("Export & close"),
+    );
+  });
+
+  it("auto-saves bound dirty tabs on Close Others and prompts when any dirty tab is unbound", async () => {
+    const onSaveAndClose = vi.fn(async () => ({ closed: true }));
+    const bound = {
+      ...props([tab("a", "Alpha", false), tab("b", "Beta", true, "cloud-b")]),
+      onSaveAndClose,
+    };
+    const view = await mount(bound);
+    const firstTab =
+      view.host.querySelector<HTMLButtonElement>('[role="tab"]')!;
+    await act(async () => {
+      firstTab.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          clientX: 10,
+          clientY: 10,
+        }),
+      );
+    });
+    const closeOthers = [
+      ...view.host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    ].find((item) => item.textContent === "Close Others")!;
+    await act(async () => closeOthers.click());
+    expect(onSaveAndClose).toHaveBeenCalledWith(["b"]);
+    expect(
+      view.host.querySelector('[data-testid="project-tab-close-decision"]'),
+    ).toBeNull();
+
+    // Unbound dirty tab in Close Others prompts with Save & close first.
+    onSaveAndClose.mockClear();
+    await view.render({
+      ...bound,
+      tabs: [tab("a", "Alpha", false), tab("b", "Beta", true, null)],
+    });
+    await act(async () => {
+      view.host.querySelector<HTMLButtonElement>('[role="tab"]')!.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          clientX: 10,
+          clientY: 10,
+        }),
+      );
+    });
+    const closeOthersUnbound = [
+      ...view.host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    ].find((item) => item.textContent === "Close Others")!;
+    await act(async () => closeOthersUnbound.click());
+    expect(onSaveAndClose).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(
+        view.host.querySelector('[data-testid="project-tab-close-decision"]')
+          ?.textContent,
+      ).toContain("Save & close"),
+    );
   });
 });

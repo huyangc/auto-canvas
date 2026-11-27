@@ -386,15 +386,18 @@ One canonical reducer owns the canvas: `Idle`, `SymbolPlacement`,
 
 ## Project sessions
 
-- The tab strip shows with two or more project tabs. With one, the row is
-  hidden in both modes and the canvas takes its height. File's **New project
-  tab**, **Open file in new tab**, (with Cloud and no account) **Open Cloud
+- The tab strip shows at the top with two or more project tabs. With one, the
+  row is hidden in both modes and the canvas takes its height. The top bar's
+  **+ New** button (beside the mode switch) and **File → New Project** always
+  open a new blank project in a new tab while keeping existing tabs open.
+  File's **Open file in new tab**, (with Cloud and no account) **Open Cloud
   Project… ›** and **Close tab** are there with any number of tabs; an
   accounts-mode editor lists the Cloud Projects in the account menu as **My
   Cloud Projects ›** instead of File; Close tab is the
-  active tab's ×, with the same decision about unsaved work and the same
-  result (the closed work stays a recovery copy). The one project's name is
-  the top bar's. A rename in its tab ends as a blur would, keeping the typed
+  active tab's ×, with the same save-and-close behavior and the same
+  result (closed unsaved work stays a recovery copy). The one project's name is
+  the top bar's, where hovering shows an edit cue and clicking renames it in
+  place. A rename in its tab ends as a blur would, keeping the typed
   name, when the strip hides under it; an open close decision stays on
   screen and answerable. File's submenus, and the account menu's My Cloud
   Projects, collapse when their menu closes, so the Shelf list is read again
@@ -404,13 +407,18 @@ One canonical reducer owns the canvas: `Idle`, `SymbolPlacement`,
   every circuit or only favorites; the toggle is not saved.
 - Web dialogs dismiss with a small × at the top right of their header (plus
   Escape where they had it), never a text or footer Close.
-- Project renames (tab double-click, or Project Info which also renames the
-  on-screen Cell via `rename_project` + `rename_document` in one undo) commit only
-  a changed nonempty name, ≤120 characters (longer old names are never
-  truncated). Renames mark dirty; they reach the Cloud through Save or
-  auto-save, and never rebind or republish.
-- Tab menu: Close, Close Others, Close All; dirty tabs need one decision; Close
-  All leaves one blank tab.
+- Project renames (top-bar project name click, tab double-click, or Project
+  Info which also renames the on-screen Cell via `rename_project` +
+  `rename_document` in one undo) commit only a changed nonempty name, ≤120
+  characters (longer old names are never truncated). Renames mark dirty; they
+  reach the Cloud through Save or auto-save, and never rebind or republish.
+- Tab close (×, File → Close tab, and tab menu Close / Close Others / Close
+  All): clean tabs close immediately. Dirty tabs bound to a Cloud Project save
+  incrementally to Cloud automatically and close on success; if saving fails,
+  the tab stays open and offers **Save & close** (retry), **Close without
+  saving** and **Keep open**. Dirty unbound tabs (or local-only mode) ask
+  before closing with **Save & close** (or **Export & close** without Cloud),
+  **Close without saving** and **Keep open**. Close All leaves one blank tab.
 - Opening, activating and replacing are distinct session operations, not
   Document edits. Activation keeps every tab's controller and undo; discarding
   dirty work needs a decision; a recovery write is not permission. Candidates
@@ -558,11 +566,14 @@ it does.
   switch says where drawing lives; **Got it** or any switch dismisses it for
   good.
 - **Top bar.** In both modes it reads: the brand, the project's name, Undo and
-  Redo, the switch, **Import netlist…** (Auto only), **Auto Layout**, **File**
+  Redo, the switch, **+ New**, **Import netlist…** (Auto only), **Auto Layout**, **File**
   and **Agent**; an accounts-mode editor ends the row with the signed-in
-  account (below). The name is read-only, cut with an ellipsis, with File's
-  unsaved-work dot; a click opens Project Info. Below 720 px it is hidden and
-  the header stays one row. Only **File** (and, when signed in, the account
+  account (below). The name is cut with an ellipsis, with File's unsaved-work
+  dot; hovering shows an edit cue and clicking renames the project in place
+  (**File → Project Info** remains available for renaming both the project and
+  active Cell). Below 720 px the name is hidden and the header stays one row;
+  **+ New** collapses to its `+` icon on narrow windows and yields below 480 px
+  where **File → New Project** remains. Only **File** (and, when signed in, the account
   menu) opens a header popover; only one is open at a time, and Escape returns
   focus to its summary while arrow keys, Home and End never pan the canvas.
   Domain actions stay beside the surfaces they act on: **Cell Manager…** in

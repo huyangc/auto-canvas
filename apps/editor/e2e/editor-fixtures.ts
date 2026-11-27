@@ -243,6 +243,18 @@ export async function projectTabAction(
       .click();
     return dialog;
   }
+  if (name === "New project tab") {
+    const newButton = page.getByTestId("new-project-button");
+    if (await newButton.isVisible()) {
+      await newButton.click();
+      return dialog;
+    }
+    const file = await openMenu(page, "File");
+    await file
+      .getByRole("button", { name: "New Project", exact: true })
+      .click();
+    return dialog;
+  }
   const file = await openMenu(page, "File");
   await file.getByRole("button", { name, exact: true }).click();
   return dialog;

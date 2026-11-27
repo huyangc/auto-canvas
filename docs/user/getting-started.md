@@ -46,27 +46,33 @@ to open that Cell.
 ## The editor
 
 The header has the project's name, **Undo** and **Redo**, the mode switch,
-**Import netlist…** (Auto only), **Auto Layout**, the **File** menu and the
-**Agent** action. When signed in, its last control is the
+**+ New**, **Import netlist…** (Auto only), **Auto Layout**, the **File** menu
+and the **Agent** action. When signed in, its last control is the
 account menu: the round mark with your first letter and your username, which
 names the account and holds **My Cloud Projects** and **Sign out** (below
 760 px only the mark shows).
-The name is read-only there; click it to open Project Info, where it is
-changed (below 720 px it is hidden; File → Project Info still has it).
-**File** holds Project Info (circuit and Cell names), **Cell Manager…**, and the file commands;
-**New Project** replaces the current tab's circuit after asking about unsaved
-work. **Find** (`Ctrl+F`) and **Filter** (`Ctrl+Shift+F`) sit in the status bar;
+Hover the project's name and click it to rename the project in place (below
+720 px it is hidden; **File → Project Info** still lets you rename both the
+project and its Cell).
+**File** holds Project Info (circuit and Cell names), **Cell Manager…**,
+**New Project** (opens a new blank project in a new tab), and the file
+commands. **Find** (`Ctrl+F`) and **Filter** (`Ctrl+Shift+F`) sit in the status bar;
 **User Components…** sits in the **Library** panel and the **Insert** (`I`) dialog;
 and **Netlist Settings…** and **Review Netlist Issues…** sit in the Netlist panel header.
 
 Each project tab is an independent circuit with its own view, selection, undo
-history and Cloud binding. With one project the tab bar is hidden, and **File**
-has **New project tab**, **Open file in new tab** and **Close tab** (when
+history and Cloud binding. With one project the tab bar is hidden, and you can
+start another project from the top bar's **+ New** button or **File → New
+Project**; **File** also holds **Open file in new tab** and **Close tab** (when
 signed in your Cloud Projects are in the account menu, under **My Cloud
-Projects**; without an account File also has **Open Cloud Project…**); with two or more the tab bar shows, with the same
-actions (**+** is New project tab, **×** closes a tab). With one project rename it in Project Info; in the tab bar,
-double-click a tab's name to rename it and right-click it for **Close**,
-**Close Others** and **Close All**. Refresh
+Projects**; without an account File also has **Open Cloud Project…**). With two
+or more projects the tab bar shows below the top bar with the same actions
+(**+** opens a new tab, **×** closes a tab). Closing a modified Cloud-saved
+project automatically saves its latest changes to Cloud before closing; closing
+an unsaved new project offers **Save & close** (or **Export & close** offline),
+**Close without saving**, or **Keep open**. Rename from the top bar (click) or
+in the tab bar (double-click), and right-click a tab for **Close**, **Close
+Others** and **Close All**. Refresh
 restores this window's tabs and unsaved circuits (not Undo stacks); after
 closing the browser tab, a new editor tab offers **Reopen tabs**. This
 browser-local workspace is not a backup: save or export what you need.

@@ -145,7 +145,11 @@ export function FileCommandMenu({
             Cell Manager…
           </button>
         ) : null}
-        <button type="button" onClick={onNewProject}>
+        <button
+          type="button"
+          disabled={projectTabs?.busy}
+          onClick={projectTabs ? projectTabs.onNew : onNewProject}
+        >
           New Project
         </button>
       </>
@@ -156,13 +160,6 @@ export function FileCommandMenu({
       key: "tabs",
       content: (
         <>
-          <button
-            type="button"
-            disabled={projectTabs.busy}
-            onClick={projectTabs.onNew}
-          >
-            New project tab
-          </button>
           <button
             type="button"
             disabled={projectTabs.busy}

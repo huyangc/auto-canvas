@@ -72,11 +72,12 @@ const button = (host: HTMLElement, name: string) =>
   );
 
 describe("FileCommandMenu project tab actions", () => {
-  it("lists the tab strip's actions including Open Cloud Project…", () => {
+  it("lists one unified New Project plus the tab strip's open/close actions", () => {
     const markup = renderToStaticMarkup(
       <FileCommandMenu {...baseProps()} projectTabs={tabActions()} />,
     );
-    expect(markup).toContain(">New project tab<");
+    expect(markup.split(">New Project<")).toHaveLength(2);
+    expect(markup).not.toContain(">New project tab<");
     expect(markup).toContain(">Open file in new tab<");
     expect(markup).toContain(">Open Cloud Project…<");
     expect(markup).not.toContain('aria-label="Cloud Projects"');
@@ -88,7 +89,7 @@ describe("FileCommandMenu project tab actions", () => {
     );
     // After New Project, before Save.
     expect(markup.indexOf(">New Project<")).toBeLessThan(
-      markup.indexOf(">New project tab<"),
+      markup.indexOf(">Open file in new tab<"),
     );
     expect(markup.indexOf(">Open Cloud Project…<")).toBeLessThan(
       markup.indexOf('data-testid="save-cloud-project"'),
@@ -103,10 +104,12 @@ describe("FileCommandMenu project tab actions", () => {
         projectTabs={tabActions()}
       />,
     );
-    expect(local).toContain(">New project tab<");
+    expect(local).toContain(">New Project<");
+    expect(local).not.toContain(">New project tab<");
     expect(local).toContain(">Open file in new tab<");
     expect(local).not.toContain("Open Cloud Project…");
     const none = renderToStaticMarkup(<FileCommandMenu {...baseProps()} />);
+    expect(none).toContain(">New Project<");
     expect(none).not.toContain("New project tab");
     expect(none).not.toContain("Open file in new tab");
     expect(none).not.toContain("Close tab");
@@ -114,12 +117,14 @@ describe("FileCommandMenu project tab actions", () => {
   });
 
   it("runs the strip's handlers and disables them while tabs are busy", async () => {
+    const props = baseProps();
     const actions = tabActions();
-    const host = await mount({ ...baseProps(), projectTabs: actions });
-    await act(async () => button(host, "New project tab")!.click());
+    const host = await mount({ ...props, projectTabs: actions });
+    await act(async () => button(host, "New Project")!.click());
     await act(async () => button(host, "Open file in new tab")!.click());
     await act(async () => button(host, "Open Cloud Project…")!.click());
     expect(actions.onNew).toHaveBeenCalledTimes(1);
+    expect(props.onNewProject).not.toHaveBeenCalled();
     expect(actions.onOpenFile).toHaveBeenCalledTimes(1);
     expect(actions.onOpenCloudProjects).toHaveBeenCalledTimes(1);
     // The menu's own button takes the focus back when the tab is kept.
@@ -127,13 +132,10 @@ describe("FileCommandMenu project tab actions", () => {
     expect(actions.onClose).toHaveBeenCalledWith(host.querySelector("summary"));
     await act(async () =>
       root!.render(
-        <FileCommandMenu
-          {...baseProps()}
-          projectTabs={{ ...actions, busy: true }}
-        />,
+        <FileCommandMenu {...props} projectTabs={{ ...actions, busy: true }} />,
       ),
     );
-    expect(button(host, "New project tab")!.disabled).toBe(true);
+    expect(button(host, "New Project")!.disabled).toBe(true);
     expect(button(host, "Open file in new tab")!.disabled).toBe(true);
     expect(button(host, "Open Cloud Project…")!.disabled).toBe(true);
     expect(button(host, "Close tab")!.disabled).toBe(true);
@@ -245,7 +247,7 @@ describe("FileCommandMenu", () => {
     );
     expect(markup).not.toContain("Open Cloud Project…");
     expect(markup).not.toContain('aria-label="Cloud Projects"');
-    expect(markup).toContain(">New project tab<");
+    expect(markup).toContain(">New Project<");
     expect(markup).toContain(">Close tab<");
     expect(markup).toContain('data-testid="save-cloud-project"');
     expect(markup).toContain('data-testid="check-and-save"');

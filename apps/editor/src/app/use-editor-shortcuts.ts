@@ -323,6 +323,7 @@ function createEditorShortcutHandler({
     if (
       event.target instanceof Element &&
       (event.target.closest(".project-tab-name-input") ||
+        event.target.closest(".app-project-name-input") ||
         event.target.closest(".cloud-shelf-dialog, .change-log-dialog") ||
         // An open File or account menu scrolls and closes itself; Escape
         // returns focus to its button, and no arrow pans. Enter and Space

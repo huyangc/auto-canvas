@@ -256,10 +256,10 @@ test("Check and Save keeps its snapshot safe while the drawing is replaced or ed
   // Replaced while saving: the new drawing is neither checked nor bound to
   // the Cloud Project the old one becomes.
   await checkAndSaveOneResistor();
-  const fileMenu = await openMenu(page, "File");
-  await fileMenu
-    .getByRole("button", { name: "New Project", exact: true })
-    .click();
+  await openProjectFile(
+    page,
+    createEmptyProject("project-replacement", "Replacement"),
+  );
   await expect(page.getByTestId("hit-R1")).toHaveCount(0);
   await expect(issues).toHaveText("Not checked");
   releases.shift()!();
