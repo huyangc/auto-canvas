@@ -123,6 +123,7 @@ export function createEditorFileCommands({
     setStatus(
       result.status === "cancelled" ? "Export cancelled" : artifact.report,
     );
+    return result.status !== "cancelled";
   };
 
   const exportSvg = async (): Promise<void> => {
@@ -133,8 +134,9 @@ export function createEditorFileCommands({
         resolver,
         project.name,
       );
-      await deliverArtifact(artifact);
+      if (await deliverArtifact(artifact)) recordUsage?.("export.svg", "ok");
     } catch (error) {
+      recordUsage?.("export.svg", "failed");
       setStatus(error instanceof Error ? error.message : "Export failed");
     }
   };
@@ -179,8 +181,14 @@ export function createEditorFileCommands({
       () => false,
     );
     const plan = await planned;
-    if (plan.status === "blocked") setStatus(plan.message);
-    else setStatus((await copied) ? plan.artifact.report : CLIPBOARD_FALLBACK);
+    if (plan.status === "blocked") {
+      recordUsage?.("export.netlist", "failed");
+      setStatus(plan.message);
+      return;
+    }
+    const ok = await copied;
+    recordUsage?.("export.netlist", ok ? "ok" : "failed");
+    setStatus(ok ? plan.artifact.report : CLIPBOARD_FALLBACK);
   };
 
   const exportDesignNetlist = async (
@@ -190,6 +198,7 @@ export function createEditorFileCommands({
   ): Promise<void> => {
     showNetlist(mode, namingProfile);
     if (netlistConfigurationError) {
+      recordUsage?.("export.netlist", "failed");
       setStatus(`Fix Netlist configuration: ${netlistConfigurationError}`);
       return;
     }
@@ -204,7 +213,12 @@ export function createEditorFileCommands({
       electricalWarningsPresent: electricalWarningsPresent(),
     };
     if (rnl && destination === "clipboard") {
-      await copyRnlNetlist(options);
+      try {
+        await copyRnlNetlist(options);
+      } catch {
+        recordUsage?.("export.netlist", "failed");
+        setStatus(CLIPBOARD_FALLBACK);
+      }
       return;
     }
     let plan;
@@ -216,10 +230,12 @@ export function createEditorFileCommands({
           })
         : planDesignNetlistExport(options);
     } catch (error) {
+      recordUsage?.("export.netlist", "failed");
       setStatus(rnlFailure(error));
       return;
     }
     if (plan.status === "blocked") {
+      recordUsage?.("export.netlist", "failed");
       setStatus(plan.message);
       return;
     }
@@ -230,6 +246,8 @@ export function createEditorFileCommands({
           mediaType: plan.artifact.mediaType,
           suggestedName: `${safeExportBaseName(project.name)}.${plan.artifact.extension}`,
         });
+        if (result.status !== "cancelled")
+          recordUsage?.("export.netlist", "ok");
         setStatus(
           result.status === "cancelled"
             ? "Export cancelled"
@@ -241,8 +259,10 @@ export function createEditorFileCommands({
         return;
       }
       await exportDelivery.copyText(String(plan.artifact.bytes));
+      recordUsage?.("export.netlist", "ok");
       setStatus(plan.artifact.report);
     } catch (error) {
+      recordUsage?.("export.netlist", "failed");
       setStatus(
         destination === "file"
           ? error instanceof Error
@@ -262,8 +282,9 @@ export function createEditorFileCommands({
         resolver,
         project.name,
       );
-      await deliverArtifact(artifact);
+      if (await deliverArtifact(artifact)) recordUsage?.("export.raster", "ok");
     } catch (error) {
+      recordUsage?.("export.raster", "failed");
       const failure = describeExportFailure(error);
       setStatus(failure.status);
       if (failure.chunkFeature) onChunkLoadFailure?.(failure.chunkFeature);

@@ -1,3 +1,5 @@
+import { registerAnalytics } from "./user-analytics.js";
+import type { registerUsageLog } from "./usage-log.js";
 import {
   createHash,
   randomBytes,
@@ -40,6 +42,8 @@ export function registerAccounts(
   base: string,
   limit: number,
   relay: AgentRelayHost,
+  recordServerUsage: ReturnType<typeof registerUsageLog>["recordServerUsage"],
+  now?: () => number,
 ) {
   function issueCookie(c: Context, token: string) {
     setCookie(c, sessionCookie(c, base), token, {
@@ -167,6 +171,7 @@ export function registerAccounts(
       if (active >= 8 || attempt.limited() || accountAttempt?.limited())
         return c.json({ error: "Too many attempts. Try again later." }, 429);
       active++;
+      let completed: { userId: string; status: 200 | 201 } | null = null;
       try {
         let userId: string;
         const salt = randomBytes(16);
@@ -215,7 +220,7 @@ export function registerAccounts(
           await conn.query("BEGIN");
           if (action === "register") {
             await conn.query(
-              "INSERT INTO users(id,display_name) VALUES ($1,$2)",
+              "INSERT INTO users(id,display_name,last_role) VALUES ($1,$2,'user')",
               [userId, username],
             );
             const inserted = await conn.query(
@@ -262,10 +267,17 @@ export function registerAccounts(
         // historical relay objects without holding up this sign-in response.
         void relay.endAccountPairings(retired);
         issueCookie(c, token);
-        return c.json({ ok: true }, action === "register" ? 201 : 200);
+        completed = { userId, status: action === "register" ? 201 : 200 };
       } finally {
         active--;
       }
+      await recordServerUsage(
+        completed.userId,
+        `auth.${action}`,
+        "ok",
+        completed.status,
+      );
+      return c.json({ ok: true }, completed.status);
     });
   }
   app.use("/api/*", async (c, next) => {
@@ -429,6 +441,7 @@ export function registerAccounts(
       active--;
     }
   });
+  registerAnalytics(app, db, "accounts", now);
   registerAccountAdministration(app, db, relay, presented);
   registerComponents(app, db, async (c) => c.get("sessionUser"), base);
   registerProjects(app, db, (c) => c.get("sessionUser").id, limit);

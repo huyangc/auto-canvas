@@ -401,3 +401,50 @@ describe("the back/forward cache", () => {
     await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
   });
 });
+
+it.each([true, false])(
+  "mounts the notebook analytics route with admin=%s",
+  async (isAdmin) => {
+    vi.stubEnv("BASE_URL", "/canvas/");
+    const previous = location.pathname;
+    try {
+      history.replaceState(null, "", "/canvas/analytics");
+      nativeLocal.setItem(TOKEN_KEY, "alice-token");
+      const native = vi.fn<typeof fetch>(
+        async () => new Response(null, { status: 503 }),
+      );
+      window.fetch = native;
+      const { loadModules } = await start({
+        identify: async () => ({
+          kind: "user",
+          user: {
+            id: "alice",
+            displayName: "Alice",
+            role: isAdmin ? "admin" : "user",
+            isAdmin,
+            provider: "notebook",
+          },
+        }),
+      });
+      await vi.waitFor(() =>
+        expect(root.textContent).toContain(
+          isAdmin ? "User Analytics" : "Administrator access required",
+        ),
+      );
+      expect(loadModules).not.toHaveBeenCalled();
+      if (isAdmin) {
+        await vi.waitFor(() => expect(native).toHaveBeenCalled());
+        const request = native.mock.calls[0]?.[0];
+        if (!(request instanceof Request))
+          throw Error("Expected a scoped API request");
+        expect(request.headers.get("Authorization")).toBe("Bearer alice-token");
+        expect(new URL(request.url).pathname).toBe(
+          "/canvas/api/admin/analytics/overview",
+        );
+      } else expect(native).not.toHaveBeenCalled();
+    } finally {
+      history.replaceState(null, "", previous);
+      vi.unstubAllEnvs();
+    }
+  },
+);

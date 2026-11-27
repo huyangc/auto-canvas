@@ -12,8 +12,9 @@ import {
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
-function account() {
+function account(isAdmin = false) {
   return {
+    isAdmin,
     username: "a12345678",
     prepareLogout: vi.fn(),
     logout: vi.fn(),
@@ -76,9 +77,26 @@ describe("HeaderAccountMenu", () => {
     expect(markup).toContain("Auto Canvas account");
     expect(markup).toContain('role="group" aria-label="Account"');
     expect(markup).toContain('data-testid="sign-out"');
+    expect(markup).not.toContain("open-analytics");
     expect(markup).toContain(">Sign out<");
   });
 
+  it("opens analytics in another tab for admins and closes the menu", async () => {
+    const host = await mount(account(true));
+    const menu = host.querySelector("details")!;
+    menu.open = true;
+    const link = host.querySelector<HTMLAnchorElement>(
+      '[data-testid="open-analytics"]',
+    )!;
+    expect([link.pathname, link.target, link.rel]).toEqual([
+      "/analytics",
+      "_blank",
+      "noopener",
+    ]);
+    link.addEventListener("click", (e) => e.preventDefault());
+    link.click();
+    expect(menu.open).toBe(false);
+  });
   it("renders nothing without an account context", () => {
     // Local mode and the desktop build mount no provider.
     expect(renderToStaticMarkup(<HeaderAccountMenu />)).toBe("");

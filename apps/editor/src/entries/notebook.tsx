@@ -18,6 +18,7 @@ import type { createWebEditorServices } from "../services/web-editor-services";
 import "../styles.css";
 import { configureWebServiceWorker } from "./web-service-worker";
 
+import { isAnalyticsPath } from "../features/analytics/analytics-route";
 interface EditorModules {
   App: ComponentType<AppProps>;
   createWebEditorServices: typeof createWebEditorServices;
@@ -65,7 +66,10 @@ export function mountNotebookEditor(overrides: NotebookEntryOverrides = {}) {
   let fetchInstalled = false;
   /** The body's inline `display` before concealment, while concealed. */
   let concealedFrom: { value: string; priority: string } | null = null;
-  startNotebookGate<EditorModules>({
+  const analytics = isAnalyticsPath(page.location.pathname, baseUrl);
+  startNotebookGate<
+    EditorModules | typeof import("../features/analytics/analytics-dashboard")
+  >({
     subscribe: (onChange, onConceal) =>
       observeSessionEvents(page, onChange, onConceal),
     // The token is silicon-notebook's, in the browser's own storage; reaching
@@ -81,16 +85,15 @@ export function mountNotebookEditor(overrides: NotebookEntryOverrides = {}) {
     identify:
       overrides.identify ??
       ((token) => identifyUser(token, { fetch: nativeFetch, baseUrl })),
-    loadApp:
-      overrides.loadModules ??
-      (() =>
-        Promise.all([
-          import("../app/App"),
-          import("../services/web-editor-services"),
-        ]).then(([app, services]) => ({
-          App: app.App,
-          createWebEditorServices: services.createWebEditorServices,
-        }))),
+    loadApp: async () => {
+      if (analytics) return import("../features/analytics/analytics-dashboard");
+      if (overrides.loadModules) return overrides.loadModules();
+      const [{ App }, { createWebEditorServices }] = await Promise.all([
+        import("../app/App"),
+        import("../services/web-editor-services"),
+      ]);
+      return { App, createWebEditorServices };
+    },
     installStorage: (userId) => storage.setNamespace(namespacePrefix(userId)),
     installFetch: (token, onUnauthorized) => {
       // Once per document, never restored: see docs/specs/server.md.
@@ -106,17 +109,34 @@ export function mountNotebookEditor(overrides: NotebookEntryOverrides = {}) {
       page.fetch = scoped.fetch;
       return scoped.revoke;
     },
-    mountApp: ({ App, createWebEditorServices }, _token, user) => {
+    mountApp: (modules, _token, user) => {
+      container.replaceChildren();
+      const root = createRoot(container);
+      if ("default" in modules) {
+        const AnalyticsDashboard = modules.default;
+        root.render(
+          <EditorErrorBoundary>
+            <AnalyticsDashboard
+              mode="notebook"
+              currentUserId={user.id}
+              username={user.displayName}
+              isAdmin={user.isAdmin === true}
+              editorHref={baseUrl}
+            />
+          </EditorErrorBoundary>,
+        );
+        return () => root.unmount();
+      }
+      const { App, createWebEditorServices } = modules;
       const standard = createWebEditorServices();
       const services = {
         ...standard,
         capabilities: { ...standard.capabilities, agent: false },
       };
-      container.replaceChildren();
-      const root = createRoot(container);
       root.render(
         <EditorErrorBoundary>
           <App
+            analyticsHref={user.isAdmin ? baseUrl + "analytics" : undefined}
             services={services}
             publicAgentUiEnabled={false}
             notebookUser={{

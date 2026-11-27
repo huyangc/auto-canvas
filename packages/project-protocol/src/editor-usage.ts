@@ -5,6 +5,11 @@ export const editorUsageActions = [
   "mode.auto",
   "netlist.import",
   "netlist.edit",
+  "layout.auto",
+  "export.svg",
+  "export.raster",
+  "export.netlist",
+  "export.project",
 ] as const;
 export type RecordEditorUsage = (
   action: (typeof editorUsageActions)[number],

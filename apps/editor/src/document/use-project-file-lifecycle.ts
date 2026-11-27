@@ -147,6 +147,7 @@ type RecoveryLifecycle = Pick<
 };
 
 export interface UseProjectFileLifecycleOptions {
+  recordUsage?: import("@icm/project-protocol").RecordEditorUsage | undefined;
   /** Reuse canonical bytes for the exact committed snapshot; never acknowledges a save. */
   serializeSnapshot?: (project: CircuitProject) => string;
   projectStore: CloudProjectStore | null;
@@ -210,6 +211,7 @@ export interface UseProjectFileLifecycleOptions {
 }
 
 export function useProjectFileLifecycle({
+  recordUsage,
   serializeSnapshot = serializeProject,
   projectStore,
   exportDelivery,
@@ -956,6 +958,8 @@ export function useProjectFileLifecycle({
         });
         if (liveSessionRef.current !== exportSessionId) return;
         if (owner && !isActivationCurrent(owner)) return;
+        if (result.status !== "cancelled")
+          recordUsage?.("export.project", "ok");
         if (result.status === "saved") {
           noteProjectSnapshotSafe(snapshot);
           setStatus(`Exported: ${fileName}`);
@@ -966,6 +970,7 @@ export function useProjectFileLifecycle({
               : `Export requested: ${fileName}`,
           );
       } catch (error) {
+        recordUsage?.("export.project", "failed");
         if (
           liveSessionRef.current === exportSessionId &&
           (!owner || isActivationCurrent(owner))
@@ -980,9 +985,11 @@ export function useProjectFileLifecycle({
       serializeProject: serializeSnapshot,
     });
     if (outcome.status !== "download-requested") {
+      recordUsage?.("export.project", "failed");
       setStatus(`Export failed: ${outcome.message}`);
       return;
     }
+    recordUsage?.("export.project", "ok");
     // The bytes now live in a local file: leaving no longer loses them.
     noteProjectSnapshotSafe(snapshot);
     recovery.noteFormalFileHint({

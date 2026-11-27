@@ -1,12 +1,23 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { createRoot } from "react-dom/client";
 import { apiUrl } from "../lib/app-url";
 import { ACCOUNT_SESSION_ENDING, bindAccountStorage } from "./storage";
 import { AccountContext, type AccountLogoutCheck } from "./account-context";
+import { EditorErrorBoundary } from "../components/editor-error-boundary";
 import "./accounts.css";
 
 import { identify } from "./session";
 
+import { isAnalyticsPath } from "../features/analytics/analytics-route";
+const AnalyticsDashboard = lazy(
+  () => import("../features/analytics/analytics-dashboard"),
+);
 const eventKey = () => `auto-canvas:session:${import.meta.env.BASE_URL}`;
 function announce() {
   try {
@@ -104,6 +115,118 @@ function Credentials({ onSuccess }: { onSuccess(): void }) {
           }}
         >
           {register ? "Back to sign in" : "Create an account"}
+        </button>
+      </form>
+    </main>
+  );
+}
+
+function ForcedPasswordChange({
+  username,
+  onSuccess,
+  onSignOut,
+}: {
+  username: string;
+  onSuccess(): void;
+  onSignOut(): void;
+}) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (pending) return;
+    const data = new FormData(e.currentTarget);
+    const currentPassword = String(data.get("currentPassword") ?? "");
+    const newPassword = String(data.get("newPassword") ?? "");
+    const confirmPassword = String(data.get("confirmPassword") ?? "");
+    if (newPassword !== confirmPassword) {
+      setError("New passwords do not match.");
+      return;
+    }
+    setPending(true);
+    setError("");
+    try {
+      const res = await fetch(apiUrl("auth/password"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        const code = payload?.error;
+        setError(
+          code === "incorrect-password"
+            ? "Current password is incorrect."
+            : code === "password-unchanged"
+              ? "Choose a password different from the temporary one."
+              : code === "invalid-fields"
+                ? "Use a new password of 8–128 characters."
+                : code || "Could not update password. Please try again.",
+        );
+        return;
+      }
+      announce();
+      onSuccess();
+    } catch {
+      setError("Cannot reach the account server.");
+    } finally {
+      setPending(false);
+    }
+  }
+  return (
+    <main className="canvas-account-screen">
+      <form
+        className="canvas-account-form"
+        onSubmit={(event) => void submit(event)}
+      >
+        <span>Auto Canvas · {username}</span>
+        <h1>Change your password</h1>
+        <small>
+          Your password was reset by an administrator. Set a new password before
+          continuing.
+        </small>
+        <label>
+          Temporary password
+          <input
+            required
+            autoFocus
+            name="currentPassword"
+            type="password"
+            maxLength={128}
+            autoComplete="current-password"
+          />
+        </label>
+        <label>
+          New password
+          <input
+            required
+            name="newPassword"
+            type="password"
+            minLength={8}
+            maxLength={128}
+            autoComplete="new-password"
+          />
+        </label>
+        <small>Use 8–128 characters.</small>
+        <label>
+          Confirm new password
+          <input
+            required
+            name="confirmPassword"
+            type="password"
+            minLength={8}
+            maxLength={128}
+            autoComplete="new-password"
+          />
+        </label>
+        {error && <p role="alert">{error}</p>}
+        <button type="submit" disabled={pending}>
+          Update password
+        </button>
+        <button type="button" disabled={pending} onClick={onSignOut}>
+          Sign out
         </button>
       </form>
     </main>
@@ -268,6 +391,8 @@ export function mountAccountGate(
         }
         return response;
       };
+      const analytics = isAnalyticsPath(window.location.pathname);
+      const mustChangePassword = identity.user.mustChangePassword === true;
       async function logout() {
         if (container.inert || closing) return;
         container.inert = true;
@@ -275,8 +400,9 @@ export function mountAccountGate(
         window.dispatchEvent(new Event(ACCOUNT_SESSION_ENDING));
         let abort: (() => void) | void;
         try {
-          if (!prepare) throw Error("The workspace is still opening.");
-          abort = await prepare();
+          if (!analytics && !mustChangePassword && !prepare)
+            throw Error("The workspace is still opening.");
+          abort = await prepare?.();
         } catch (error) {
           container.inert = false;
           window.alert(
@@ -302,6 +428,8 @@ export function mountAccountGate(
       root.render(
         <AccountContext.Provider
           value={{
+            id,
+            isAdmin: identity.user.isAdmin === true,
             username: displayName,
             prepareLogout: (check) => {
               prepare = check;
@@ -309,7 +437,27 @@ export function mountAccountGate(
             logout: () => void logout(),
           }}
         >
-          {editor()}
+          {mustChangePassword ? (
+            <ForcedPasswordChange
+              username={displayName}
+              onSuccess={() => void check()}
+              onSignOut={() => void logout()}
+            />
+          ) : analytics ? (
+            <EditorErrorBoundary>
+              <Suspense fallback={<p>Loading analytics…</p>}>
+                <AnalyticsDashboard
+                  mode="accounts"
+                  currentUserId={id}
+                  username={displayName}
+                  isAdmin={identity.user.isAdmin === true}
+                  onSignOut={() => void logout()}
+                />
+              </Suspense>
+            </EditorErrorBoundary>
+          ) : (
+            editor()
+          )}
         </AccountContext.Provider>,
       );
     } catch {

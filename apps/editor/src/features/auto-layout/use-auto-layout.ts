@@ -36,6 +36,7 @@ function createAutoLayoutWorker(): AutoLayoutWorker | null {
 }
 
 export interface AutoLayoutEditorBinding {
+  recordUsage?: import("@icm/project-protocol").RecordEditorUsage | undefined;
   project: CircuitProject;
   document: SchematicDocument;
   projectSessionId: string;
@@ -93,8 +94,13 @@ export function useAutoLayout(binding: AutoLayoutEditorBinding) {
   const abandonedRef = useRef(new WeakMap<object, AutoLayoutAbandonedRun>());
   const sessionRef = useRef<AutoLayoutSession | null>(null);
   sessionRef.current ??= createAutoLayoutSession({
-    createWorker: () =>
-      (bindingRef.current.createWorker ?? createAutoLayoutWorker)(),
+    createWorker: () => {
+      const worker = (
+        bindingRef.current.createWorker ?? createAutoLayoutWorker
+      )();
+      if (!worker) bindingRef.current.recordUsage?.("layout.auto", "failed");
+      return worker;
+    },
     live: (): AutoLayoutFence => {
       const { controller } = bindingRef.current;
       return {
@@ -123,6 +129,8 @@ export function useAutoLayout(binding: AutoLayoutEditorBinding) {
     setStatus: (status) => bindingRef.current.setStatus(status),
     onChange: setState,
     onVerdicts: (verdicts) => bindingRef.current.onVerdicts?.(verdicts),
+    onOutcome: (outcome) =>
+      bindingRef.current.recordUsage?.("layout.auto", outcome),
     onApplied: (documentIds) => {
       // Only the Cell the person is looking at is reset; laying out other
       // Cells leaves its selection and view alone.

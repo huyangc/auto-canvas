@@ -21,7 +21,7 @@ interface GateEffects<Modules> {
   readToken: () => TokenRead;
   identify: (token: string) => Promise<Identification>;
   /** The editor modules: started only after a successful identification. */
-  loadApp: () => Promise<Modules>;
+  loadApp: (user: NotebookUser) => Promise<Modules>;
   /**
    * Binds the page's browser storage to this user, once; throws when the
    * storage cannot be bound.
@@ -156,7 +156,7 @@ export function startNotebookGate<Modules>(effects: GateEffects<Modules>) {
     const userId = identity.user.id;
     let modules: Modules;
     try {
-      modules = await effects.loadApp();
+      modules = await effects.loadApp(identity.user);
     } catch {
       // No Retry: a document may keep a failed module load, so importing
       // the same modules again can fail after the network is back. The

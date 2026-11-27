@@ -7,6 +7,8 @@ import { createContext, useContext, useLayoutEffect, useRef } from "react";
 export type AccountLogoutCheck = () => Promise<(() => void) | void>;
 
 export const AccountContext = createContext<{
+  id?: string;
+  isAdmin?: boolean;
   username: string;
   prepareLogout(check: AccountLogoutCheck | null): void;
   logout(): void;

@@ -188,6 +188,7 @@ describe("startServer", () => {
       "005-account-agent-pairings.sql",
       "006-account-administration.sql",
       "007-group-shared-libraries.sql",
+      "008-user-analytics.sql",
     ]);
   });
 

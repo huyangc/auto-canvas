@@ -215,6 +215,8 @@ it("keeps the released migrations byte for byte", () => {
       ]),
   );
   expect(digests).toEqual({
+    "008-user-analytics.sql":
+      "91ca3b4466f74f4e017b951674f0a72855487f99d711a65c7242f3c970bcbb13",
     "007-group-shared-libraries.sql":
       "69c710b3ebc8be325d62dd1e3460dd69063ba23855411a1186eb06b418e43c84",
     "006-account-administration.sql":

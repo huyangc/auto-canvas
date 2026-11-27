@@ -132,6 +132,7 @@ async function mountEditor(
   initial = createLibraryExampleProject("two-stage-op-amp")!,
 ) {
   const workers: QuickWorker[] = [];
+  const recordUsage = vi.fn();
   const committed = vi.fn();
   const clearEditorSelection = vi.fn();
   const fitView = vi.fn();
@@ -157,6 +158,7 @@ async function mountEditor(
     view.status = status;
     view.docs = docs;
     view.autoLayout = useAutoLayout({
+      recordUsage,
       project: docs.project,
       document: docs.document,
       projectSessionId: docs.projectSessionId,
@@ -176,13 +178,29 @@ async function mountEditor(
   }
   root = createRoot(document.createElement("div"));
   await act(async () => root!.render(<Harness />));
-  return { view, workers, committed, clearEditorSelection, fitView };
+  return {
+    view,
+    workers,
+    recordUsage,
+    committed,
+    clearEditorSelection,
+    fitView,
+  };
 }
 
+it("records planner failure and ignores cancellation", async () => {
+  const { view, workers, recordUsage } = await mountEditor();
+  await act(async () => void view.autoLayout!.start());
+  await act(async () => view.autoLayout!.cancel());
+  expect(recordUsage).not.toHaveBeenCalled();
+  await act(async () => void view.autoLayout!.start());
+  await act(async () => workers[1]!.onerror?.({ message: "unavailable" }));
+  expect(recordUsage.mock.calls).toEqual([["layout.auto", "failed"]]);
+});
 describe("Auto Layout after an import", () => {
   it("starts one run once the imported Project has rendered", async () => {
     const imported = await importNetlistProject(NETLIST_B);
-    const { view, workers } = await mountEditor();
+    const { view, workers, recordUsage } = await mountEditor();
     // As installImport does: replace, then ask, before any re-render.
     await act(async () => {
       view.docs!.replaceProject(imported);
@@ -208,6 +226,7 @@ describe("Auto Layout after an import", () => {
     expect(view.status).toBe(
       "Imported 2 Documents · Auto Layout applied to 2 of 2 Cells — Details",
     );
+    expect(recordUsage.mock.calls).toEqual([["layout.auto", "ok"]]);
     expect(view.docs!.canUndo).toBe(true);
     for (const document of view.docs!.project.documents)
       expect(document.routes.length).toBeGreaterThan(0);
@@ -343,5 +362,23 @@ describe("Auto Layout after an import", () => {
       "the tab was left while Auto Layout was planning",
       "the tab was left while Auto Layout was planning",
     ]);
+  }, 60_000);
+
+  it("records a failed layout outcome when a single-cell import gets no plan back", async () => {
+    const imported = await importNetlistProject(NETLIST_A);
+    const { view, workers, recordUsage } = await mountEditor(imported);
+    await act(async () => view.autoLayout!.requestAfterImport("Imported 1"));
+    expect(workers).toHaveLength(1);
+    await act(async () => {
+      workers[0]!.onmessage?.({
+        data: {
+          type: "result",
+          runId: workers[0]!.request!.runId,
+          results: [],
+        },
+      });
+    });
+    expect(view.autoLayout!.report).toBeNull();
+    expect(recordUsage).toHaveBeenCalledWith("layout.auto", "failed");
   }, 60_000);
 });
