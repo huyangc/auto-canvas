@@ -89,7 +89,11 @@ it("retains the incumbent on ties and rejected previews", () => {
 function run(result: AutoLayoutResult): refinement.LayoutRun {
   const applied = preview(document, resolver, result.edits);
   if (!applied.ok) throw Error("synthetic route refused");
-  return { result, final: applied.document, choices: emptyChoices() };
+  return {
+    result,
+    final: structuredClone(applied.document),
+    choices: emptyChoices(),
+  };
 }
 
 it("returns the finished runner-up when finishing reverses the provisional ranking", () => {

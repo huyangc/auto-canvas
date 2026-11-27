@@ -1,6 +1,16 @@
 import { deriveElectricalTopologyProjection, endpointKey } from "@icm/derived";
-import { executeTransaction, type SchematicEdit } from "@icm/edit-engine";
-import type { SchematicDocument } from "@icm/model";
+import {
+  executeTransaction,
+  previewPlannerTransaction,
+  type SchematicEdit,
+} from "@icm/edit-engine";
+import { planningMemo } from "./planning-reuse.js";
+import {
+  freezeSnapshot,
+  isFrozenSnapshot,
+  shareEqualDocumentStructure,
+  type SchematicDocument,
+} from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import {
   claimedMarkerSymbol,
@@ -26,7 +36,26 @@ export function reusePreviews<T>(work: () => T): T {
   }
 }
 
-/** Validate with the same transaction boundary the caller will commit. */
+export function replayEdits(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  edits: SchematicEdit[],
+  trusted = false,
+) {
+  return (trusted ? previewPlannerTransaction : executeTransaction)(
+    document,
+    {
+      transactionId: "auto-layout-preview",
+      documentId: document.id,
+      expectedRevision: document.revision,
+      actor: { kind: "agent", id: "auto-layout" },
+      dryRun: true,
+      edits,
+    },
+    { symbolResolver: resolver },
+  );
+}
+
 export function preview(
   document: SchematicDocument,
   resolver: SymbolResolver,
@@ -39,18 +68,13 @@ export function preview(
       ? undefined
       : previews?.get(document)?.get(resolver)?.get(key);
   if (cached) return cached;
-  const result = executeTransaction(
-    document,
-    {
-      transactionId: "auto-layout-preview",
-      documentId: document.id,
-      expectedRevision: document.revision,
-      actor: { kind: "agent", id: "auto-layout" },
-      dryRun: true,
-      edits,
-    },
-    { symbolResolver: resolver },
-  );
+  const result = replayEdits(document, resolver, edits, true);
+  if (result.ok && result.document !== document) {
+    // Keep unchanged Route identities across incremental routing previews.
+    if (isFrozenSnapshot(document))
+      result.document = shareEqualDocumentStructure(document, result.document);
+    freezeSnapshot(result.document);
+  }
   if (previews && key !== undefined) {
     const resolvers =
       previews.get(document) ??
@@ -70,17 +94,19 @@ export function terminalPartition(
   document: SchematicDocument,
   resolver: SymbolResolver,
 ): string {
-  const nets = new Map<string, string[]>();
-  for (const [key, net] of deriveElectricalTopologyProjection(
-    document,
-    resolver,
-  ).endpointToBaseNet) {
-    if (!key.startsWith("terminal:")) continue;
-    const members = nets.get(net) ?? [];
-    members.push(key);
-    nets.set(net, members);
-  }
-  return JSON.stringify([...nets.values()].map((pins) => pins.sort()).sort());
+  return planningMemo(document, resolver, "terminal-partition", () => {
+    const nets = new Map<string, string[]>();
+    for (const [key, net] of deriveElectricalTopologyProjection(
+      document,
+      resolver,
+    ).endpointToBaseNet) {
+      if (!key.startsWith("terminal:")) continue;
+      const members = nets.get(net) ?? [];
+      members.push(key);
+      nets.set(net, members);
+    }
+    return JSON.stringify([...nets.values()].map((pins) => pins.sort()).sort());
+  });
 }
 
 /** Preserve the original partition and admit only same-name rail duplicates.

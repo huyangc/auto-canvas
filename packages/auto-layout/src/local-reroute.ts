@@ -97,8 +97,10 @@ export function rerouteCrossings(
   resolver: SymbolResolver,
   result: AutoLayoutResult,
   stopped: () => boolean,
+  final?: SchematicDocument,
 ): AutoLayoutResult {
-  return rerouteNets(source, resolver, result, stopped);
+  if (final && !auditRouting(final, resolver).crossings) return result;
+  return rerouteNets(source, resolver, result, stopped, undefined, final);
 }
 
 /** R148: reconsider crossed rails against the finished signal geometry. */
@@ -118,6 +120,7 @@ function rerouteNets(
   result: AutoLayoutResult,
   stopped: () => boolean,
   finish?: (result: AutoLayoutResult) => AutoLayoutResult,
+  final?: SchematicDocument,
 ): AutoLayoutResult {
   const rails = !!finish;
   const limit = MAX_SCHEMATIC_EDITS_PER_TRANSACTION;
@@ -127,7 +130,9 @@ function rerouteNets(
     stopped()
   )
     return result;
-  const initial = preview(source, resolver, result.edits);
+  const initial = final
+    ? { ok: true, document: final }
+    : preview(source, resolver, result.edits);
   if (!initial.ok) return result;
   let doc = initial.document;
   const counts = crossingsByNet(doc, resolver);

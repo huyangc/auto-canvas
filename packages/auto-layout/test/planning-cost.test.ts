@@ -1,7 +1,12 @@
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { expect, it, vi } from "vitest";
 import * as editEngine from "@icm/edit-engine";
-import { defaultLayoutSearch, planAutoLayout } from "../src/auto-layout.js";
+import * as blockers from "../src/blocker-repair.js";
+import {
+  aprGuardsRegressed,
+  defaultLayoutSearch,
+  planAutoLayout,
+} from "../src/auto-layout.js";
 import {
   finishingTrialBudget,
   planningBudget,
@@ -117,3 +122,61 @@ it.each(["planRouteNet", "planWireBatch"] as const)(
   },
   60_000,
 );
+
+it("repairs an identical quick route only once during finishing", () => {
+  const repair = vi.spyOn(blockers, "repairBlockers");
+  try {
+    const result = planAutoLayout(fixture(), resolver, {
+      search: { seed: 1, evaluations: 0 },
+    });
+    expect(result.edits.length).toBeGreaterThan(0);
+    expect(repair).toHaveBeenCalledTimes(1);
+  } finally {
+    repair.mockRestore();
+  }
+});
+
+it("rejects an APR placement that breaks a satisfied alignment", () => {
+  const before = circuit({ a: "resistor", b: "resistor" }, {});
+  before.instances[0]!.placement = placement(0, 0);
+  before.instances[1]!.placement = placement(200, 0);
+  before.constraints.push({
+    id: "row",
+    kind: "align-y",
+    objectIds: ["a", "b"],
+    locked: false,
+  });
+  const after = structuredClone(before);
+  after.instances[1]!.placement = placement(200, 80);
+  expect(aprGuardsRegressed(before, after, resolver)).toBe(true);
+  expect(aprGuardsRegressed(after, before, resolver)).toBe(false);
+});
+
+it("freezes only transaction-owned preview documents", () => {
+  const document = fixture();
+  const noChange = preview(document, resolver, []);
+  expect(noChange.document).toBe(document);
+  const target = placement(30, 40);
+  const edits = [
+    { kind: "place_instance" as const, instanceId: "a", placement: target },
+  ];
+  const result = preview(document, resolver, edits);
+  const checked = editEngine.executeTransaction(
+    document,
+    {
+      transactionId: "checked",
+      documentId: document.id,
+      expectedRevision: document.revision,
+      actor: { kind: "agent", id: "test" },
+      dryRun: true,
+      edits,
+    },
+    { symbolResolver: resolver },
+  );
+  expect(result).toEqual(checked);
+  target.position.x = 90;
+  expect(result.document.instances[0]!.placement!.position.x).toBe(30);
+  expect(result.ok).toBe(true);
+  expect(Object.isFrozen(result.document.instances)).toBe(true);
+  expect(Object.isFrozen(document.instances)).toBe(false);
+});

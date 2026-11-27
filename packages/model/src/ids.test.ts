@@ -12,6 +12,19 @@ describe("stable identity", () => {
     );
   });
 
+  it.each(["", "ascii", "A|:\0".repeat(8192), "Ω电🙂", "before\ud800after"])(
+    "matches the reference hash of framed UTF-8 input %#",
+    (part) => {
+      let hash = 0xcbf29ce484222325n;
+      for (const byte of new TextEncoder().encode(`${part.length}:${part}`)) {
+        hash = BigInt.asUintN(64, (hash ^ BigInt(byte)) * 0x100000001b3n);
+      }
+      expect(deriveStableId("test", part)).toBe(
+        `test-${hash.toString(16).padStart(16, "0")}`,
+      );
+    },
+  );
+
   it("creates prefixed IDs from an injected UUID source", () => {
     expect(
       createId("route", () => "00000000-0000-4000-8000-000000000000"),

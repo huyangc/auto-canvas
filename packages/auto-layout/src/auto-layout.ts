@@ -110,6 +110,7 @@ import {
   lostNameClaim,
   preview,
   reusePreviews,
+  replayEdits,
   restoreBulkPins,
   restorePinGroups,
   terminalPartition,
@@ -150,6 +151,7 @@ import {
   copyRefinedResult,
   refinementMetrics,
   refineLayout,
+  retainRefinementMetrics,
   routedScore,
   selectRoutingAlternative,
   type LayoutRun,
@@ -292,8 +294,28 @@ function refuseUnconnected(
   resolver: SymbolResolver,
   result: AutoLayoutResult,
 ): AutoLayoutResult {
-  const document = finishedDocument(source, resolver, result);
-  if (!document || connectionsIntact(document, resolver)) return result;
+  if (result.diagnostics.some((d) => d.severity === "error")) return result;
+  const replay = result.edits.length
+    ? replayEdits(source, resolver, result.edits)
+    : { ok: true as const, document: source };
+  if (!replay.ok)
+    return {
+      edits: [],
+      groups: result.groups,
+      diagnostics: [
+        ...result.diagnostics,
+        {
+          severity: "error",
+          code: "AUTO_LAYOUT_RULE_UNSATISFIED",
+          rule: "R10",
+          message:
+            "R10: delivered transaction rejected: " +
+            JSON.stringify(replay.diagnostics),
+        },
+      ],
+    };
+  const document = replay.document;
+  if (connectionsIntact(document, resolver)) return result;
   const missing = missingConnections(document, resolver);
   const pins = [
     ...new Set(
@@ -1299,6 +1321,31 @@ function planWithFixedDrafting(
   return plan();
 }
 
+/** @internal Compare routed APR diagnostics before accepting a finished proposal. */
+export function aprGuardsRegressed(
+  before: SchematicDocument,
+  after: SchematicDocument,
+  resolver: SymbolResolver,
+) {
+  const criticalGuards = [
+    "floating",
+    "missing",
+    "VISUAL_WIRE_THROUGH_SYMBOL",
+    "VISUAL_LABEL_OVERLAP",
+    "VISUAL_SYMBOL_OVERLAP",
+    "VISUAL_CONSTRAINT_VIOLATION",
+    "VISUAL_AMBIGUOUS_JUNCTION",
+    "VISUAL_ROUTE_OVERLAP",
+    "VISUAL_TERMINAL_ON_FOREIGN_ROUTE",
+    ...(before.instances.length > 40 ? ["VISUAL_LABEL_CLEARANCE"] : []),
+  ];
+  const baseGuards = routedGuards(before, resolver);
+  const afterGuards = routedGuards(after, resolver);
+  return criticalGuards.some(
+    (key) => (afterGuards[key] ?? 0) > (baseGuards[key] ?? 0),
+  );
+}
+
 function planAutoLayoutMeasured(
   document: SchematicDocument,
   resolver: SymbolResolver,
@@ -1560,6 +1607,41 @@ function planAutoLayoutMeasured(
         signalTrunks,
         finishOptions,
       );
+      // Repair can try a different trunk policy for an R14 obstruction.
+      // Only collapse routes when that policy cannot change the repair.
+      if (
+        !run.partition &&
+        (!signalTrunks ||
+          !run.result.diagnostics.some((d) => d.rule === "R14")) &&
+        (alternative === run ||
+          (run.final &&
+            alternative.final &&
+            run.result.edits.length === alternative.result.edits.length &&
+            JSON.stringify(run.result.edits) ===
+              JSON.stringify(alternative.result.edits) &&
+            JSON.stringify(run.result.diagnostics) ===
+              JSON.stringify(alternative.result.diagnostics)))
+      ) {
+        const polished = crossCoupled(
+          compact(current, strategy, signalTrunks, finishOptions),
+          strategy,
+          signalTrunks,
+          finishOptions,
+        );
+        // A changed polished route still competes with the raw alternative.
+        // Explicit quick mode also records its R44 comparison for inspection.
+        if (polished !== run || finishOptions.search?.evaluations === 0)
+          return selectRoutingAlternative(
+            polished,
+            alternative,
+            resolver,
+            strategy,
+            run.result,
+          );
+        retainRefinementMetrics(polished, run.result, resolver);
+        refinementMetrics(polished.result)!.strategy = strategy;
+        return polished.result;
+      }
       const other = repair(alternative, strategy, false, finishOptions);
       const otherWins = compareRuns(other, current, resolver) < 0;
       return selectRoutingAlternative(
@@ -2027,6 +2109,7 @@ function planAutoLayoutMeasured(
         }
       : undefined;
   const baseOptions = options;
+  const polishedFinalists = new Map<string, AutoLayoutResult>();
   const finishFinalist = (
     selected: Candidate,
     searchFinalist: boolean,
@@ -2329,22 +2412,11 @@ function planAutoLayoutMeasured(
         !connectionsIntact(afterPreview.document, resolver)
       )
         return annealedBaseline;
-      const criticalGuards = [
-        "floating",
-        "missing",
-        "VISUAL_WIRE_THROUGH_SYMBOL",
-        "VISUAL_LABEL_OVERLAP",
-        "VISUAL_SYMBOL_OVERLAP",
-        "VISUAL_AMBIGUOUS_JUNCTION",
-        "VISUAL_ROUTE_OVERLAP",
-        "VISUAL_TERMINAL_ON_FOREIGN_ROUTE",
-        ...(document.instances.length > 40 ? ["VISUAL_LABEL_CLEARANCE"] : []),
-      ];
-      const baseGuards = routedGuards(basePreview.document, resolver);
-      const afterGuards = routedGuards(afterPreview.document, resolver);
       if (
-        criticalGuards.some(
-          (key) => (afterGuards[key] ?? 0) > (baseGuards[key] ?? 0),
+        aprGuardsRegressed(
+          basePreview.document,
+          afterPreview.document,
+          resolver,
         )
       )
         return annealedBaseline;
@@ -2481,6 +2553,16 @@ function planAutoLayoutMeasured(
       document.instances.length <= 40 &&
       !stopped()
     ) {
+      // Symmetry changes which movements are licensed. Keep each such
+      // polishing context and its drafting origin independent.
+      const polishKey = JSON.stringify([
+        contactResult,
+        draftingTranslation(contactResult),
+        options.unsplitSymmetry,
+        options.mirrorSymmetry,
+      ]);
+      const polished = polishedFinalists.get(polishKey);
+      if (!searchFinalist && polished) return copyResult(polished);
       const incumbent = finishLabels(contactResult);
       const replay = preview(document, resolver, incumbent.edits);
       if (!replay.ok) return contactResult;
@@ -2529,6 +2611,27 @@ function planAutoLayoutMeasured(
             );
           });
         });
+      // routeGroup only tries signal trunks on non-power targets of three
+      // or more pins. Without one, both policies perform identical work.
+      const pinGroups = planningMemo(
+        document,
+        resolver,
+        "original-pin-groups",
+        () => freezePinGroups(document, resolver),
+      );
+      const sourceRoles = planningMemo(
+        document,
+        resolver,
+        "original-net-roles",
+        () => classifyNets(document, resolver),
+      );
+      const canUseSignalTrunks = pinGroups.some(
+        (group) =>
+          group.pins.length >= 3 &&
+          !["ground", "supply"].includes(
+            sourceRoles.byNet.get(group.netId) ?? "",
+          ),
+      );
       const finishPlacement = (
         placements: ReadonlyMap<string, Placement>,
         contacts?: ReturnType<typeof contactPolicy>,
@@ -2564,23 +2667,29 @@ function planAutoLayoutMeasured(
           );
         // Every trial goes through the same finalist repairs, compaction, facing
         // and labels as the incumbent before R146 compares any score or guard.
+        const first = routeSeat(true);
+        // Even a clean routing can lose on bends, wire length or readability.
+        const second = canUseSignalTrunks ? routeSeat(false) : first;
+        if (!first.final && !second.final) {
+          cache.set(key, first);
+          return first;
+        }
+        const selected = finish(first, second, strategy, true, options);
+        const raw =
+          selected === first.result
+            ? first
+            : selected === second.result
+              ? second
+              : undefined;
+        const selectedEdits = selected.edits;
+        const faced = finalizeFacing(document, resolver, options, selected);
         const finished = finishLabels(
           rerouteCrossings(
             document,
             resolver,
-            finalizeFacing(
-              document,
-              resolver,
-              options,
-              finish(
-                routeSeat(true),
-                routeSeat(false),
-                strategy,
-                true,
-                options,
-              ),
-            ),
+            faced,
             stopped,
+            faced.edits === selectedEdits ? raw?.final : undefined,
           ),
         );
         const final = preview(document, resolver, finished.edits);
@@ -2603,11 +2712,7 @@ function planAutoLayoutMeasured(
       // R148 retains R140's licensed contacts already present in the finalist.
       // R147's alignment trials keep them as well (T140); the gaps replan
       // below adds its own port and anchor handling to the same policy.
-      const railContacts = contactPolicy(
-        document,
-        freezePinGroups(document, resolver),
-        true,
-      );
+      const railContacts = contactPolicy(document, pinGroups, true);
       const licensedReplan = (placements: ReadonlyMap<string, Placement>) =>
         finishPlacement(placements, railContacts);
       // R147 keeps a feedback part that lies in its row beside its block. A
@@ -2796,8 +2901,8 @@ function planAutoLayoutMeasured(
           gapIncumbent,
         ),
       );
-      const repairLabels = (run: LayoutRun) =>
-        timePhase(
+      const repairLabels = (run: LayoutRun) => {
+        const polished = timePhase(
           "labelRepair",
           () =>
             repairStubLabels(
@@ -2809,6 +2914,9 @@ function planAutoLayoutMeasured(
               options.pitch,
             ).result,
         );
+        polishedFinalists.set(polishKey, copyResult(polished));
+        return polished;
+      };
       // R152: compare one complete branch-column candidate with the finished
       // incumbent. Existing modes, locks and explicit relationships keep their
       // placement contract; this candidate only enters plain bounded planning.
@@ -3144,10 +3252,16 @@ function buildPlan(
         },
       ],
     };
-  const frozen = freezePinGroups(document, resolver);
-  const freed = freedAnnotations(document);
+  const frozen = planningMemo(document, resolver, "original-pin-groups", () =>
+    freezePinGroups(document, resolver),
+  );
+  const freed = planningMemo(document, resolver, "freed-annotations", () =>
+    freedAnnotations(document),
+  );
   const roles = {
-    ...classifyNets(document, resolver),
+    ...planningMemo(document, resolver, "original-net-roles", () =>
+      classifyNets(document, resolver),
+    ),
     seriesLevels: options.seriesLevels ?? true,
     symmetricHalfOrder: options.symmetricHalfOrder ?? false,
     unsplitSymmetry: options.unsplitSymmetry ?? false,
@@ -3513,7 +3627,9 @@ function buildPlan(
   edits.push(...claims);
   if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION)
     return refuse("R10: R16 complete edit list exceeds transaction limit");
-  const named = claims.length ? preview(document, resolver, edits) : replay;
+  const named = claims.length
+    ? preview(replay.document, resolver, claims)
+    : replay;
   if (!named.ok)
     return refuse(
       `R10: name-claim transfer rejected: ${JSON.stringify(named.diagnostics)}`,
@@ -3523,7 +3639,7 @@ function buildPlan(
   if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION)
     return refuse("R10: R16 complete edit list exceeds transaction limit");
   const reanchored = anchors.length
-    ? preview(document, resolver, edits)
+    ? preview(named.document, resolver, anchors)
     : named;
   if (!reanchored.ok)
     return refuse(
@@ -3540,7 +3656,9 @@ function buildPlan(
   edits.push(...labels);
   if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION)
     return refuse("R73: complete edit list exceeds transaction limit");
-  const final = labels.length ? preview(document, resolver, edits) : reanchored;
+  const final = labels.length
+    ? preview(reanchored.document, resolver, labels)
+    : reanchored;
   if (!final.ok)
     return refuse(
       `R10: final replay rejected: ${JSON.stringify(final.diagnostics)}`,

@@ -1,5 +1,6 @@
 import {
   deriveStableId,
+  isFrozenSnapshot,
   routeEnd,
   routeElectricalConnections,
   junctionElectricalEndpoints,
@@ -8,6 +9,7 @@ import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 
 import { buildDocumentDerivedContext } from "./document-derived-context.js";
+import { registerDocumentCache } from "./document-caches.js";
 import { endpointKey } from "./endpoint.js";
 import { resolveDocumentLogicalNets } from "./logical-net.js";
 
@@ -80,6 +82,17 @@ function ownerKey(
   }
 }
 
+const projections = registerDocumentCache(
+  new WeakMap<
+    SchematicDocument,
+    {
+      revision: number;
+      context: ReturnType<typeof buildDocumentDerivedContext> | undefined;
+      projection: ElectricalTopologyProjection;
+    }
+  >(),
+);
+
 /**
  * Derive the electrical facts used to validate a planned routing operation.
  * The projection is independent of a planner's changed-object report.
@@ -88,10 +101,14 @@ export function deriveElectricalTopologyProjection(
   document: SchematicDocument,
   resolver?: SymbolResolver,
 ): ElectricalTopologyProjection {
-  const endpointToBaseNet = new Map<string, string>();
   const context = resolver
     ? buildDocumentDerivedContext(document, resolver)
     : undefined;
+  const frozen = isFrozenSnapshot(document);
+  const cached = frozen ? projections.get(document) : undefined;
+  if (cached?.revision === document.revision && cached.context === context)
+    return cached.projection;
+  const endpointToBaseNet = new Map<string, string>();
   const sets = new DisjointSet();
   for (const net of document.nets) {
     for (const terminal of net.terminals) {
@@ -169,7 +186,7 @@ export function deriveElectricalTopologyProjection(
       ),
     );
   }
-  return {
+  const projection = {
     endpointToBaseNet,
     endpointToPhysicalComponent,
     logicalNetByBaseNet,
@@ -177,4 +194,11 @@ export function deriveElectricalTopologyProjection(
     routeIncidence,
     junctionIncidence,
   };
+  if (frozen)
+    projections.set(document, {
+      revision: document.revision,
+      context,
+      projection,
+    });
+  return projection;
 }

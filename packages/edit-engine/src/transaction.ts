@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { routeEnd, SchematicDocumentSchema } from "@icm/model";
 import type { SchematicDocument } from "@icm/model";
 import { applyLabelSignalMigration } from "./label-signal-migration.js";
@@ -108,6 +109,14 @@ export * from "./edit-schema.js";
 export * from "./transaction-result.js";
 import { reusePreparedTransaction } from "./prepared-transaction.js";
 
+// The planner owns the record shapes, but references between the records
+// still have to hold in every trial (for example a marker's Net may vanish).
+const typedDocument = z.custom<SchematicDocument>();
+const plannerDocumentChecks = typedDocument.clone({
+  ...typedDocument.def,
+  checks: SchematicDocumentSchema.def.checks ?? [],
+});
+
 export function executeTransaction(
   document: SchematicDocument,
   input: EditTransaction | unknown,
@@ -123,7 +132,47 @@ export function executeTransaction(
     );
   }
 
-  const transaction = parsed.data;
+  return executeParsedTransaction(document, parsed.data, context, false);
+}
+
+/** @internal Planner-generated JSON edits. The delivered list is validated by
+ * executeTransaction before it leaves the planner. Keep speculative results
+ * outside the prepared-transaction mechanism used by commits. */
+export function previewPlannerTransaction(
+  document: SchematicDocument,
+  input: EditTransaction & { dryRun: true },
+  context: EditExecutionContext,
+): EditTransactionResult {
+  if (input.dryRun !== true)
+    return executeTransaction(document, input, context);
+  return executeParsedTransaction(
+    document,
+    cloneModelValue(input),
+    context,
+    true,
+  );
+}
+
+// Documents and edit payloads are JSON trees. Detach both: handlers can put
+// an edit's nested record directly into the mutable draft.
+function cloneModelValue<T>(value: T): T {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(cloneModelValue) as T;
+  const copy = { ...value };
+  for (const key of Object.keys(copy) as (keyof T)[]) {
+    const child = copy[key];
+    if (child !== null && typeof child === "object")
+      copy[key] = cloneModelValue(child);
+  }
+  return copy;
+}
+
+function executeParsedTransaction(
+  document: SchematicDocument,
+  transaction: EditTransaction,
+  context: EditExecutionContext,
+  trustedPreview: boolean,
+): EditTransactionResult {
   if (transaction.documentId !== document.id) {
     return rejectTransaction(
       document,
@@ -171,11 +220,14 @@ export function executeTransaction(
     };
   }
 
-  const prepared = reusePreparedTransaction(document, transaction, context);
+  const prepared =
+    !trustedPreview && reusePreparedTransaction(document, transaction, context);
   if (prepared) return prepared;
 
   const proposedRevision = document.revision + 1;
-  const draft = structuredClone(document);
+  const draft = trustedPreview
+    ? cloneModelValue(document)
+    : structuredClone(document);
   const references = createReferenceValidationCache(draft);
   // Removing a Route's geometry states its geometry too: a Junction dragged
   // onto the pin at the far end of a stub collapses that stub.
@@ -258,32 +310,13 @@ export function executeTransaction(
   const originalPathRead = resolver
     ? prepareRoutePathRead(document, resolver, originalEndpointLookup)
     : undefined;
-  const originalRouteStates = new Map(
-    resolver
-      ? document.routes
-          .filter(
-            (route) =>
-              routeValidationIds === undefined ||
-              routeValidationIds.has(route.id),
-          )
-          .map((route) => {
-            const resolvedPath = originalPathRead!(route);
-            return [
-              route.id,
-              {
-                points: resolvedPath?.points ?? null,
-                error: validateRoute(
-                  document,
-                  route,
-                  resolver,
-                  resolvedPath,
-                  "committed",
-                  originalEndpointLookup,
-                ),
-              },
-            ];
-          })
-      : [],
+  // Only surviving routes can have a pre-existing geometry error to compare.
+  const originalRoutes = new Map(
+    document.routes
+      .filter(
+        (route) => !routeValidationIds || routeValidationIds.has(route.id),
+      )
+      .map((route) => [route.id, route]),
   );
   const originalNetLabelAnchors = resolver
     ? captureNetLabelRouteAnchors(
@@ -1146,17 +1179,18 @@ export function executeTransaction(
   if (resolver)
     reconcileJunctionContactAnchors(draft, resolver, changedObjectIds);
 
-  const originalNetContractIssueKeys = connectivityChanged
+  const netContractIssues = connectivityChanged
+    ? validateLogicalNetContract(draft)
+    : [];
+  const originalNetContractIssueKeys = netContractIssues.length
     ? new Set(
         validateLogicalNetContract(document).map(logicalNetContractIssueKey),
       )
-    : new Set<string>();
-  const introducedNetContractIssue = connectivityChanged
-    ? validateLogicalNetContract(draft).find(
-        (issue) =>
-          !originalNetContractIssueKeys.has(logicalNetContractIssueKey(issue)),
-      )
     : undefined;
+  const introducedNetContractIssue = netContractIssues.find(
+    (issue) =>
+      !originalNetContractIssueKeys?.has(logicalNetContractIssueKey(issue)),
+  );
   if (introducedNetContractIssue) {
     const message =
       introducedNetContractIssue.code === "CONFLICTING_LOGICAL_NET_SCOPE"
@@ -1191,7 +1225,8 @@ export function executeTransaction(
       finalEndpointLookup,
     );
     for (const route of routesToValidate) {
-      const original = originalRouteStates.get(route.id);
+      const original = originalRoutes.get(route.id);
+      const originalPath = original && originalPathRead!(original);
       const resolvedPath = finalPathRead(route);
       const routeError = validateRoute(
         draft,
@@ -1204,12 +1239,19 @@ export function executeTransaction(
       const resolvedPoints = resolvedPath?.points ?? null;
       const resolvedGeometryChanged =
         original === undefined ||
-        !sameResolvedRoutePoints(original.points, resolvedPoints);
+        !sameResolvedRoutePoints(originalPath?.points ?? null, resolvedPoints);
       if (routeError) {
         const unchangedPreexistingError =
           original !== undefined &&
           !resolvedGeometryChanged &&
-          original.error === routeError;
+          validateRoute(
+            document,
+            original,
+            resolver,
+            originalPath ?? null,
+            "committed",
+            originalEndpointLookup,
+          ) === routeError;
         if (!unchangedPreexistingError) {
           return rejectTransaction(
             document,
@@ -1256,7 +1298,9 @@ export function executeTransaction(
     context.externalSubcircuitDefinitions,
     changedObjectIds,
   );
-  const candidate = SchematicDocumentSchema.safeParse(draft);
+  const candidate = (
+    trustedPreview ? plannerDocumentChecks : SchematicDocumentSchema
+  ).safeParse(draft);
   if (!candidate.success) {
     return rejectTransaction(
       document,

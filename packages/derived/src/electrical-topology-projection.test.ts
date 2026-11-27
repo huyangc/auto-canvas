@@ -75,6 +75,7 @@ describe("electrical topology projection", () => {
     expect(first.endpointToPhysicalComponent.get("junction:J1")).toBe(
       first.endpointToPhysicalComponent.get("terminal:R1:1"),
     );
+    expect(deriveElectricalTopologyProjection(document, resolver)).toBe(first);
     const moved = structuredClone(resistor);
     moved.pins[0]!.at.x += 100;
     delete moved.pins[0]!.routing;

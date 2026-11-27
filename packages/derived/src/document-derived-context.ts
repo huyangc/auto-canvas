@@ -6,7 +6,7 @@ import {
   routeElectricalConnections,
 } from "@icm/model";
 import type { SchematicDocument } from "@icm/model";
-import type { SymbolResolver } from "@icm/symbols";
+import { InMemorySymbolResolver, type SymbolResolver } from "@icm/symbols";
 
 import {
   deriveDocumentContactEvidence,
@@ -70,7 +70,8 @@ export interface DocumentDerivedContext {
 
 interface CachedDocumentDerivedContext {
   readonly revision: number;
-  readonly symbols: string;
+  readonly symbols: string | ReturnType<typeof resolvedSymbols>;
+  readonly stableResolver?: SymbolResolver;
   readonly context: DocumentDerivedContext;
 }
 
@@ -99,13 +100,29 @@ export function buildDocumentDerivedContext(
   document: SchematicDocument,
   resolver: SymbolResolver,
 ): DocumentDerivedContext {
-  const symbols = isFrozenSnapshot(document)
-    ? resolvedSymbolContext(document, resolver)
-    : undefined;
-  const cached = symbols === undefined ? undefined : contextCache.get(document);
-  if (cached?.revision === document.revision && cached.symbols === symbols) {
+  const frozen = isFrozenSnapshot(document);
+  const cached = frozen ? contextCache.get(document) : undefined;
+  const stable =
+    frozen && InMemorySymbolResolver.hasStableDefinitions(resolver);
+  if (
+    stable &&
+    cached?.revision === document.revision &&
+    cached.stableResolver === resolver
+  )
     return cached.context;
-  }
+  // Stable catalogs own their frozen definitions. Retain those references
+  // and serialize only when comparing independent catalogs. A mutable
+  // resolver still needs an immediate value snapshot for invalidation.
+  const resolved = frozen ? resolvedSymbols(document, resolver) : undefined;
+  const symbols = resolved && !stable ? JSON.stringify(resolved) : resolved;
+  if (
+    cached?.revision === document.revision &&
+    (typeof cached.symbols === "string"
+      ? cached.symbols
+      : JSON.stringify(cached.symbols)) ===
+      (typeof symbols === "string" ? symbols : JSON.stringify(symbols))
+  )
+    return cached.context;
   const endpointLookup = buildEndpointObjectLookup(document);
   const {
     instancesById,
@@ -236,15 +253,16 @@ export function buildDocumentDerivedContext(
     contextCache.set(document, {
       revision: document.revision,
       symbols,
+      ...(stable ? { stableResolver: resolver } : {}),
       context,
     });
   return context;
 }
 
-function resolvedSymbolContext(
+function resolvedSymbols(
   document: SchematicDocument,
   resolver: SymbolResolver,
-): string {
+) {
   const references = new Map<string, readonly [string, string | undefined]>();
   for (const instance of document.instances) {
     const reference = [instance.symbolId, instance.symbolVariantId] as const;
@@ -255,9 +273,7 @@ function resolvedSymbolContext(
     const reference = [object.symbolId, undefined] as const;
     references.set(JSON.stringify(reference), reference);
   }
-  return JSON.stringify(
-    [...references.values()].map(
-      ([id, variant]) => resolver.resolve(id, variant) ?? null,
-    ),
+  return [...references.values()].map(
+    ([id, variant]) => resolver.resolve(id, variant) ?? null,
   );
 }

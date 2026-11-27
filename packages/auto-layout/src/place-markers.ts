@@ -377,12 +377,13 @@ function placePowerMarkers(
         local.y,
     );
     targets.set(i.id, defaultSeat);
-    if (assigned && index === 0 && !free(i)) {
+    if (assigned && index === 0) {
       const hostInstance = posed.find((d) => d.id === assigned.instanceId);
       const seat =
         hostInstance &&
         railExit(hostInstance, assigned.pinName, resolver, ground) ===
           "sideways" &&
+        !free(i) &&
         extraHostSeats(
           document,
           hostInstance,
