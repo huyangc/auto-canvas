@@ -25,6 +25,15 @@ import {
   type SchematicDocument,
 } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
+import {
+  MAX_CHANNEL_TRACKS,
+  compareNetSpans,
+  crossingNetPairs,
+  netSpan,
+  discoverChannelTracks,
+  protectedObjects,
+} from "./global-route-order.js";
+import { railCrossingMetrics } from "./readability-rail-crossings.js";
 import { markerOffset, pinPoints, integerPoint } from "./geometry.js";
 import { channelPins, isMos, type NetRoles } from "./net-roles.js";
 import {
@@ -37,10 +46,16 @@ import { railMarkerClaim } from "./rail-marker-identity.js";
 import { compareIds, recognizeSubstructures } from "./recognize.js";
 import {
   auditRouting,
+  floatingPins,
   crossingsByNet,
   missingConnections,
 } from "./routing-audit.js";
-import { preview, restorePinGroups } from "./transaction.js";
+import {
+  preview,
+  restorePinGroups,
+  terminalPartition,
+  lostNameClaim,
+} from "./transaction.js";
 import {
   assignRailHosts,
   samePin,
@@ -48,7 +63,11 @@ import {
   type PinContact,
   type TerminalRef,
 } from "./pin-contacts.js";
-import type { AutoLayoutDiagnostic, RecognizedGroup } from "./types.js";
+import type {
+  AutoLayoutDiagnostic,
+  AutoLayoutOptions,
+  RecognizedGroup,
+} from "./types.js";
 
 // Stub routes share the same immutable trial snapshots as net routes.
 const planWireBatch: typeof planWireBatchOnce = (
@@ -574,6 +593,8 @@ function routeGroup(
   points: ReturnType<typeof pinPoints>,
   reservedKey: string,
   sharedLandings = false,
+  chooseRailTrack = false,
+  stopped?: () => boolean,
 ): GroupRouting {
   let working = document;
   let failed = false;
@@ -720,7 +741,31 @@ function routeGroup(
           if (ys[0] !== ys.at(-1))
             trunks.push({ start: { x, y: ys[0]! }, end: { x, y: ys.at(-1)! } });
         }
-        // A rail's tree is tried only if its preferred trunk is incomplete.
+        if (
+          chooseRailTrack &&
+          target.trunk &&
+          target.trunk.start.y === target.trunk.end.y
+        ) {
+          const pins = points
+            .filter((p) => target.pins.some((ref) => samePin(ref, p)))
+            .map((p) => p.point);
+          for (const y of discoverChannelTracks(
+            working,
+            resolver,
+            pins,
+            "y",
+            true,
+          )) {
+            if (trunks.length >= MAX_CHANNEL_TRACKS) break;
+            if (y !== target.trunk.start.y)
+              trunks.push({
+                start: { ...target.trunk.start, y },
+                end: { ...target.trunk.end, y },
+              });
+          }
+        }
+        // The primary pass keeps a complete preferred trunk. In the alternate
+        // pass the spanning tree competes with the explicit tracks.
         if (target.trunk) trunks.push(undefined);
         let best:
           | {
@@ -731,6 +776,7 @@ function routeGroup(
           | undefined;
         let reason: unknown;
         for (const trunk of trunks) {
+          if (stopped?.()) break;
           try {
             // Routing alternatives and repair trials can revisit the same
             // immutable snapshot. Keep the validated net plan within this
@@ -769,7 +815,10 @@ function routeGroup(
             const candidate = routed.plan;
             if (
               trunks.length === 1 ||
-              (target.trunk && trunk && !candidate.unjoined?.length)
+              (!chooseRailTrack &&
+                target.trunk &&
+                trunk &&
+                !candidate.unjoined?.length)
             ) {
               best = { plan: candidate, score: [] };
               break;
@@ -1033,8 +1082,14 @@ export function routeDocument(
   roles: NetRoles,
   structures: RecognizedGroup[],
   signalTrunks = true,
-  options: { ripUp?: boolean; crossX?: boolean; sharedLandings?: boolean } = {},
+  options: {
+    ripUp?: boolean;
+    negotiated?: boolean;
+    crossX?: boolean;
+    sharedLandings?: boolean;
+  } = {},
   reservedIds: ReadonlySet<string> = new Set(),
+  search?: AutoLayoutOptions["search"],
 ): {
   edits: SchematicEdit[];
   diagnostics: AutoLayoutDiagnostic[];
@@ -1070,10 +1125,14 @@ export function routeDocument(
   );
   const reservedKey = JSON.stringify([...reservedIds]);
   const routedGroups = new Map<PinGroup, GroupRouting>();
-  const removals = new Map<PinGroup, SchematicEdit[]>();
-  for (const group of ordered) {
-    const routed = routeGroup(
-      working,
+  const route = (
+    base: SchematicDocument,
+    group: PinGroup,
+    chooseRailTrack = false,
+    stopped?: () => boolean,
+  ) =>
+    routeGroup(
+      base,
       resolver,
       frozen,
       group,
@@ -1083,110 +1142,285 @@ export function routeDocument(
       points,
       reservedKey,
       options.sharedLandings,
+      chooseRailTrack,
+      stopped,
     );
-    if (options.ripUp) {
-      removals.set(group, removeGroupRouting(working, routed.document));
-      routedGroups.set(group, routed);
-    }
+  for (const group of ordered) {
+    const routed = route(working, group);
+    if (options.ripUp) routedGroups.set(group, routed);
     edits.push(...routed.edits);
     diagnostics.push(...routed.diagnostics);
     working = routed.document;
     if (routed.problem)
       return { document: working, edits, diagnostics, problem: routed.problem };
   }
-  if (!options.ripUp) return { document: working, edits, diagnostics };
-  let score = routingScore(working, resolver);
-  const crossings = crossingsByNet(working, resolver);
-  const topology = deriveElectricalTopologyProjection(working, resolver);
-  const candidates = ordered
-    .map((group, order) => {
-      const pin = group.pins[0];
-      const netId =
-        pin &&
-        topology.endpointToBaseNet.get(
-          endpointKey({ kind: "terminal", ...pin }),
-        );
-      return {
-        group,
-        order,
-        crossings: netId ? (crossings.get(netId) ?? 0) : 0,
-      };
-    })
-    // R144 seed wires may be split by reconciliation as the tree grows.
-    // Retain their whole Net so R95 cannot remove a canonical piece of the X.
-    .filter(
-      ({ group, crossings }) =>
-        !power(group) && !cross.nets.has(group.netId) && crossings > 0,
-    )
-    .sort((a, b) => b.crossings - a.crossings || a.order - b.order);
-  for (const { group } of candidates) {
-    try {
-      // Delete only objects authored by this group. Applying removal through
-      // the transaction authority advances revision beyond every retained plan.
-      const removal = removals.get(group)!;
-      if (!removal.length) continue;
-      const removed = preview(working, resolver, removal);
-      if (!removed.ok) continue;
-      const restored = preview(
-        removed.document,
-        resolver,
-        restorePinGroups(frozen, removed.document, resolver),
-      );
-      if (!restored.ok) continue;
-      const candidate = routeGroup(
-        restored.document,
-        resolver,
-        frozen,
-        group,
-        roles,
-        signalTrunks,
-        reservedIds,
-        points,
-        reservedKey,
-        options.sharedLandings,
-      );
-      if (candidate.problem || candidate.failed) continue;
-      const nextScore = routingScore(candidate.document, resolver);
-      if (
-        !nextScore.some(
-          (value, i) =>
-            value < score[i]! &&
-            nextScore.slice(0, i).every((v, j) => v === score[j]),
-        )
-      )
-        continue;
-      working = candidate.document;
-      routedGroups.set(group, candidate);
-      score = nextScore;
-    } catch {
-      // A retry is optional: retain the exact prior routing and diagnostics.
-    }
+  let best = { document: working, edits, diagnostics };
+  if (!options.ripUp || !auditRouting(working, resolver).crossings) return best;
+  const removals = new Map<PinGroup, SchematicEdit[]>();
+  let previous = cross.document;
+  for (const [group, routed] of routedGroups) {
+    removals.set(group, removeGroupRouting(previous, routed.document));
+    previous = routed.document;
   }
-  // Full audit at the pass boundary also keeps any future incremental score honest.
-  routingScore(working, resolver);
-  return {
-    document: working,
-    edits: [
-      ...cross.edits,
-      ...ordered.flatMap((group) => routedGroups.get(group)!.edits),
-    ],
-    diagnostics: ordered.flatMap(
-      (group) => routedGroups.get(group)!.diagnostics,
-    ),
+  const stopped = () =>
+    !!search?.signal?.aborted ||
+    (search?.deadline !== undefined && Date.now() >= search.deadline);
+  // The quick result is the required fallback even for an already aborted search.
+  const negotiated =
+    options.negotiated && search?.evaluations !== 0 && !stopped();
+  const clearedGroups = (groups: PinGroup[]) => {
+    const cut = groups.flatMap((group) => removals.get(group) ?? []);
+    if (!cut.length) return;
+    const removed = preview(working, resolver, cut);
+    if (!removed.ok) return;
+    const restored = preview(
+      removed.document,
+      resolver,
+      restorePinGroups(frozen, removed.document, resolver),
+    );
+    return restored.ok ? restored.document : undefined;
   };
+  const groupsByNet = (accept: (group: PinGroup) => boolean) => {
+    const topology = deriveElectricalTopologyProjection(
+      best.document,
+      resolver,
+    );
+    const groups = new Map<string, PinGroup>();
+    for (const group of ordered) {
+      const pin = group.pins[0];
+      if (!pin || !accept(group)) continue;
+      const id = topology.endpointToBaseNet.get(
+        endpointKey({ kind: "terminal", ...pin }),
+      );
+      if (id) groups.set(id, group);
+    }
+    return groups;
+  };
+  const crossedGroups = (byNet: ReadonlyMap<string, PinGroup>) => {
+    const counts = new Map<PinGroup, number>();
+    for (const [net, count] of crossingsByNet(best.document, resolver)) {
+      const group = byNet.get(net);
+      if (group) counts.set(group, count);
+    }
+    return ordered
+      .filter((g) => counts.has(g))
+      .sort((a, b) => counts.get(b)! - counts.get(a)!);
+  };
+  if (!negotiated) {
+    // Placement search uses the original single sweep and incremental score.
+    const byNet = groupsByNet((g) => !power(g) && !cross.nets.has(g.netId));
+    let score = routingScore(working, resolver);
+    for (const group of crossedGroups(byNet)) {
+      const cleared = clearedGroups([group]);
+      if (!cleared) continue;
+      const routed = route(cleared, group);
+      if (routed.problem || routed.failed) continue;
+      const next = routingScore(routed.document, resolver);
+      if (!betterRoutingScore(next, score)) continue;
+      score = next;
+      working = routed.document;
+      routedGroups.set(group, routed);
+    }
+    if (working === best.document) return best;
+    const all = [
+      ...cross.edits,
+      ...[...routedGroups.values()].flatMap((r) => r.edits),
+    ];
+    if (all.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION) return best;
+    const replay = preview(document, resolver, all);
+    return replay.ok
+      ? {
+          document: replay.document,
+          edits: all,
+          diagnostics: [...routedGroups.values()].flatMap((r) => r.diagnostics),
+        }
+      : best;
+  }
+  let score = routingScore(working, resolver, roles);
+  const crossingsRemain = () => score[1] > 0;
+  let routes = routedGroups;
+  const protectedIds = protectedObjects(document);
+  const protectedNets = new Set(
+    [
+      ...document.routes.filter(
+        (r) =>
+          protectedIds.has(r.id) ||
+          r.members ||
+          r.legs.some(
+            (l) =>
+              l.mode === "locked" ||
+              protectedIds.has(l.id) ||
+              (l.to.kind === "bend" && protectedIds.has(l.to.bendId)),
+          ),
+      ),
+      ...document.junctions.filter((j) => protectedIds.has(j.id) || j.members),
+    ].map((o) => o.netId),
+  );
+  const eligible = (g: PinGroup) =>
+    !g.contacts.length &&
+    !cross.nets.has(g.netId) &&
+    !protectedIds.has(g.netId) &&
+    !protectedNets.has(g.netId);
+  // Remove only the materialized geometry of the selected trees. Keep the
+  // single-net planner's revision sequence and its stable authored object IDs.
+  const retry = (
+    selected: PinGroup[],
+    global = false,
+    signalsFirst = false,
+  ) => {
+    let current = cross.document;
+    if (!global) {
+      const cleared = clearedGroups(selected);
+      if (!cleared) return false;
+      current = cleared;
+    }
+    const trial = new Map(routes);
+    if (global) {
+      for (const g of selected) trial.delete(g);
+      // Preserve seeded Xs, contacts and protected trees in the alternate order.
+      if (trial.size) {
+        const retained = preview(document, resolver, [
+          ...cross.edits,
+          ...[...trial.values()].flatMap((r) => r.edits),
+        ]);
+        if (!retained.ok) return false;
+        current = retained.document;
+      }
+    }
+    const replacements = new Map<PinGroup, SchematicEdit[]>();
+    for (const group of selected) {
+      if (stopped()) return false;
+      const routed = route(
+        current,
+        group,
+        signalsFirst && power(group),
+        stopped,
+      );
+      if (routed.failed || routed.problem) return false;
+      replacements.set(group, removeGroupRouting(current, routed.document));
+      current = routed.document;
+      trial.set(group, routed);
+    }
+    const all = [
+      ...cross.edits,
+      ...[...trial.values()].flatMap((r) => r.edits),
+    ];
+    if (all.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION) return false;
+    const replay = preview(document, resolver, all);
+    if (!replay.ok) return false;
+    const final = replay.document;
+    const next = routingScore(final, resolver, roles);
+    if (
+      !betterRoutingScore(next, score) ||
+      next[1] > score[1] ||
+      auditRouting(final, resolver).unsafeProblems.some(
+        (problem) =>
+          !auditRouting(best.document, resolver).unsafeProblems.includes(
+            problem,
+          ),
+      ) ||
+      floatingPins(final, resolver).length >
+        floatingPins(best.document, resolver).length ||
+      terminalPartition(final, resolver) !==
+        terminalPartition(best.document, resolver) ||
+      lostNameClaim(best.document, final)
+    )
+      return false;
+    working = current;
+    for (const [g, cut] of replacements) removals.set(g, cut);
+    routes = trial;
+    best = {
+      document: final,
+      edits: all,
+      diagnostics: [...trial.values()].flatMap((r) => r.diagnostics),
+    };
+    score = next;
+    return true;
+  };
+  for (let sweep = 0; sweep < 2; sweep++) {
+    let improved = false;
+    for (const group of crossedGroups(groupsByNet(eligible))) {
+      if (stopped()) return best;
+      if (retry([group])) improved = true;
+    }
+    if (!improved || !crossingsRemain()) break;
+  }
+  if (!crossingsRemain() || stopped()) return best;
+  const byNet = groupsByNet(eligible);
+  const pairs = crossingNetPairs(best.document, resolver, stopped)
+    .flatMap(({ a, b }) => {
+      const first = byNet.get(a),
+        second = byNet.get(b);
+      return first && second && !power(first) && !power(second)
+        ? [[first, second] as const]
+        : [];
+    })
+    .slice(0, 4);
+  for (const [a, b] of pairs) {
+    if (!crossingsRemain() || stopped()) return best;
+    retry(ordered.indexOf(a) < ordered.indexOf(b) ? [b, a] : [a, b]);
+  }
+  if (crossingsRemain() && !stopped()) {
+    const candidates = ordered.filter(eligible);
+    if (!candidates.length) return best;
+    const pinLocations = new Map(
+      points.map((p) => [
+        endpointKey({
+          kind: "terminal",
+          instanceId: p.instanceId,
+          pinName: p.pinName,
+        }),
+        p.point,
+      ]),
+    );
+    const spans = new Map(
+      candidates.map((g) => [
+        g,
+        netSpan(
+          g.netId,
+          g.pins.flatMap(
+            (ref) =>
+              pinLocations.get(endpointKey({ kind: "terminal", ...ref })) ?? [],
+          ),
+        ),
+      ]),
+    );
+    const signalsFirst = score[2] > 0;
+    const alternative = candidates.sort(
+      (a, b) =>
+        (signalsFirst ? 1 : -1) * (Number(power(a)) - Number(power(b))) ||
+        compareNetSpans(spans.get(a)!, spans.get(b)!),
+    );
+    retry(alternative, true, signalsFirst);
+  }
+  return best;
+}
+
+function betterRoutingScore(
+  next: readonly number[],
+  previous: readonly number[],
+) {
+  const difference = next.findIndex((v, i) => v !== previous[i]);
+  return difference >= 0 && next[difference]! < previous[difference]!;
 }
 
 function routingScore(
   document: SchematicDocument,
   resolver: SymbolResolver,
-): number[] {
+  roles?: NetRoles,
+) {
   const audit = auditRouting(document, resolver);
+  const rail =
+    roles && audit.crossings
+      ? railCrossingMetrics(document, resolver, roles.rails).violations
+      : 0;
   return [
     missingConnections(document, resolver),
     audit.crossings,
+    rail,
     audit.bends,
     audit.wireLength,
-  ];
+  ] as const;
 }
 
 /** Reconciliation may merge authored segments into canonical Routes/Junctions.
