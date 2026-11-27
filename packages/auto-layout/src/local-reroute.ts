@@ -1,6 +1,8 @@
 import {
   MAX_CHANNEL_TRACKS,
   discoverChannelTracks,
+  drawnBodyLeads,
+  lostDrawnBodyLead,
   protectedObjects,
 } from "./global-route-order.js";
 import { railCrossingMetrics } from "./readability-rail-crossings.js";
@@ -17,11 +19,11 @@ import {
   planRouteNet,
   type SchematicEdit,
 } from "@icm/edit-engine";
-import type { Point, SchematicDocument } from "@icm/model";
+import { routeEndpoints, type Point, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { readabilityCounts, readabilityRegressed } from "./readability.js";
 import { geometryProblem, pinPoints, withPlacements } from "./geometry.js";
-import { classifyNets } from "./net-roles.js";
+import { classifyNets, isMos } from "./net-roles.js";
 import { compareIds } from "./recognize.js";
 import { freezePinGroups } from "./route.js";
 import {
@@ -148,6 +150,10 @@ function rerouteNets(
   const roles = classifyNets(doc, resolver);
   const groups = freezePinGroups(doc, resolver);
   const protectedIds = protectedObjects(doc);
+  const mos = new Set(
+    doc.instances.filter((i) => isMos(i.symbolId)).map((i) => i.id),
+  );
+  let bodyLeads = drawnBodyLeads(doc, resolver);
   const reserved = new Set([
     ...documentObjectIds(source),
     ...documentObjectIds(doc),
@@ -227,6 +233,15 @@ function rerouteNets(
     if (
       !routes.length ||
       dots.some((j) => protectedIds.has(j.id) || j.members) ||
+      (!finish &&
+        routes.some((r) =>
+          routeEndpoints(r).some(
+            (end) =>
+              end?.kind === "terminal" &&
+              end.pinName === "B" &&
+              mos.has(end.instanceId),
+          ),
+        )) ||
       routes.some(
         (r) =>
           protectedIds.has(r.id) ||
@@ -327,7 +342,7 @@ function rerouteNets(
         }
       }
       const routedResult = withDraftingTranslation(
-        { ...result, edits },
+        { ...result, edits, diagnostics: [...result.diagnostics] },
         draftingTranslation(result),
       );
       const candidate = finish ? finish(routedResult) : routedResult;
@@ -340,6 +355,7 @@ function rerouteNets(
         rejectRouting(final, next) ||
         terminalPartition(final, resolver) !== partition ||
         lostNameClaim(doc, final) ||
+        lostDrawnBodyLead(bodyLeads, final, resolver) ||
         missingConnections(final, resolver) ||
         floatingPins(final, resolver).length
       )
@@ -385,6 +401,7 @@ function rerouteNets(
       if (rails) result = winner.result;
       else result.edits = winner.result.edits;
       doc = winner.final;
+      bodyLeads = drawnBodyLeads(doc, resolver);
       remaining = crossingsByNet(doc, resolver);
       audit = winner.audit;
       bestRails = winner.railCrossings;

@@ -51,6 +51,7 @@ import {
   rerouteRailCrossings,
   rerouteMovedPorts,
 } from "./local-reroute.js";
+import { drawnBodyLeads, lostDrawnBodyLead } from "./global-route-order.js";
 import { reroutePortfolio } from "./reroute-portfolio.js";
 import { stageComponents } from "./stage-symmetry.js";
 import { blockIntrusion } from "./partition-geometry.js";
@@ -501,6 +502,25 @@ function routeSelectedFinalist(
       followDraftingLabels(source, resolver, result),
       effectiveOptions,
     );
+  const finishReroute = (candidate: AutoLayoutResult) =>
+    finish(
+      finishLabels(
+        withDraftingTranslation(
+          {
+            ...candidate,
+            edits: [...candidate.edits],
+            diagnostics: candidate.diagnostics.filter(
+              (d) =>
+                !(
+                  d.code === "AUTO_LAYOUT_NET_UNROUTED" &&
+                  d.message.includes("visible body connection")
+                ),
+            ),
+          },
+          draftingTranslation(candidate),
+        ),
+      ),
+    );
   const negotiated = negotiateFinalist(
     source,
     resolver,
@@ -544,6 +564,7 @@ function routeSelectedFinalist(
       terminalPartition(final, resolver) !==
         terminalPartition(after, resolver) ||
       lostNameClaim(final, after) ||
+      lostDrawnBodyLead(drawnBodyLeads(final, resolver), after, resolver) ||
       readabilityRegressed(final, after, resolver) ||
       aprGuardsRegressed(final, after, resolver) ||
       Object.entries(afterGuards).some(
@@ -576,7 +597,7 @@ function routeSelectedFinalist(
     source,
     resolver,
     signals,
-    rerouteRailCrossings(source, resolver, signals, stopped, finishLabels),
+    rerouteRailCrossings(source, resolver, signals, stopped, finishReroute),
   );
   if (railed !== signals) {
     const railedDoc = finishedDocument(source, resolver, railed);
@@ -637,7 +658,8 @@ function negotiateFinalist(
     !connectionsIntact(after, resolver) ||
     auditRouting(after, resolver).unsafeProblems.length ||
     terminalPartition(final, resolver) !== terminalPartition(after, resolver) ||
-    lostNameClaim(final, after)
+    lostNameClaim(final, after) ||
+    lostDrawnBodyLead(drawnBodyLeads(final, resolver), after, resolver)
   )
     return before;
   const run = { result: candidate, final: after, choices: trial.choices };

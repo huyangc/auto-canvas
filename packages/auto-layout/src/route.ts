@@ -665,6 +665,14 @@ function routeGroup(
       )
     : undefined;
   for (const raw of targets) {
+    if (stopped?.())
+      return {
+        document: working,
+        edits,
+        diagnostics,
+        failed: true,
+        problem: "aborted",
+      };
     const seen = new Set<string>();
     const target = !sites
       ? raw
@@ -776,7 +784,14 @@ function routeGroup(
           | undefined;
         let reason: unknown;
         for (const trunk of trunks) {
-          if (stopped?.()) break;
+          if (stopped?.())
+            return {
+              document: working,
+              edits,
+              diagnostics,
+              failed: true,
+              problem: "aborted",
+            };
           try {
             // Routing alternatives and repair trials can revisit the same
             // immutable snapshot. Keep the validated net plan within this
@@ -1115,6 +1130,11 @@ export function routeDocument(
       compareIds(a.pins[0]?.instanceId ?? "", b.pins[0]?.instanceId ?? "") ||
       compareIds(a.netId, b.netId),
   );
+  const stopped = () =>
+    !!search?.signal?.aborted ||
+    (search?.deadline !== undefined && Date.now() >= search.deadline);
+  if (options.negotiated && stopped())
+    return { document: working, edits, diagnostics, problem: "aborted" };
   const cross = options.crossX
     ? routeCrossCoupled(working, resolver, frozen, roles, reservedIds)
     : { document: working, edits: [], nets: new Set<string>() };
@@ -1129,7 +1149,7 @@ export function routeDocument(
     base: SchematicDocument,
     group: PinGroup,
     chooseRailTrack = false,
-    stopped?: () => boolean,
+    stop?: () => boolean,
   ) =>
     routeGroup(
       base,
@@ -1143,10 +1163,17 @@ export function routeDocument(
       reservedKey,
       options.sharedLandings,
       chooseRailTrack,
-      stopped,
+      stop,
     );
   for (const group of ordered) {
-    const routed = route(working, group);
+    if (options.negotiated && stopped())
+      return { document: working, edits, diagnostics, problem: "aborted" };
+    const routed = route(
+      working,
+      group,
+      false,
+      options.negotiated ? stopped : undefined,
+    );
     if (options.ripUp) routedGroups.set(group, routed);
     edits.push(...routed.edits);
     diagnostics.push(...routed.diagnostics);
@@ -1162,9 +1189,6 @@ export function routeDocument(
     removals.set(group, removeGroupRouting(previous, routed.document));
     previous = routed.document;
   }
-  const stopped = () =>
-    !!search?.signal?.aborted ||
-    (search?.deadline !== undefined && Date.now() >= search.deadline);
   // An explicitly negotiated finalist trial exits immediately when its deadline
   // expires instead of falling through into the unguarded ordinary rip-up sweep.
   if (options.negotiated && stopped()) return best;

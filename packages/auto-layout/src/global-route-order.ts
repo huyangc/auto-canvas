@@ -1,10 +1,13 @@
 import {
   createLabelClearanceContext,
+  deriveElectricalTopologyProjection,
+  endpointKey,
   resolveRouteGeometry,
   visibleInstanceBounds,
 } from "@icm/derived";
-import type { Point, SchematicDocument } from "@icm/model";
+import { routeEndpoints, type Point, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
+import { isMos } from "./net-roles.js";
 import { compareIds } from "./recognize.js";
 import { planningMemo } from "./planning-reuse.js";
 
@@ -176,4 +179,58 @@ export function protectedObjects(doc: SchematicDocument, movingPorts = false) {
     if (anchor.kind === "route") ids.add(anchor.routeId);
   }
   return ids;
+}
+
+/** R162: MOS instances whose B pin ends a route, and whether each is physically
+ * joined to at least one other terminal. */
+export function drawnBodyLeads(
+  doc: SchematicDocument,
+  resolver: SymbolResolver,
+): Map<string, boolean> {
+  const mos = new Set(
+    doc.instances.filter((i) => isMos(i.symbolId)).map((i) => i.id),
+  );
+  const leads = new Set<string>();
+  for (const route of doc.routes) {
+    for (const end of routeEndpoints(route)) {
+      if (
+        end?.kind === "terminal" &&
+        end.pinName === "B" &&
+        mos.has(end.instanceId)
+      )
+        leads.add(end.instanceId);
+    }
+  }
+  const status = new Map<string, boolean>();
+  if (!leads.size) return status;
+  const topology = deriveElectricalTopologyProjection(doc, resolver);
+  const terminalCount = new Map<string, number>();
+  for (const [key, component] of topology.endpointToPhysicalComponent) {
+    if (key.startsWith("terminal:"))
+      terminalCount.set(component, (terminalCount.get(component) ?? 0) + 1);
+  }
+  for (const id of leads) {
+    const component = topology.endpointToPhysicalComponent.get(
+      endpointKey({ kind: "terminal", instanceId: id, pinName: "B" }),
+    );
+    status.set(
+      id,
+      component !== undefined && (terminalCount.get(component) ?? 0) > 1,
+    );
+  }
+  return status;
+}
+
+export function lostDrawnBodyLead(
+  before: ReadonlyMap<string, boolean>,
+  afterDoc: SchematicDocument,
+  resolver: SymbolResolver,
+): boolean {
+  if (!before.size) return false;
+  const after = drawnBodyLeads(afterDoc, resolver);
+  for (const [id, wasJoined] of before) {
+    if (!after.has(id)) return true;
+    if (wasJoined && !after.get(id)) return true;
+  }
+  return false;
 }
