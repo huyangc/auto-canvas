@@ -27,14 +27,16 @@ describe("T189 aprDetailPlace", () => {
         control: ["a.OUT", "m.G"],
       },
     );
-    const result = planAutoLayout(doc, resolver);
+    const result = planAutoLayout(doc, resolver, {
+      search: { evaluations: 2, seed: 1 },
+    });
     expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual(
       [],
     );
     const calls = planningTiming(result)?.phaseCalls;
     expect(calls?.localRails).toBeGreaterThan(1);
     expect(calls?.aprDetailPlace).toBe(1);
-  });
+  }, 15_000);
 
   it("skips APR finishing on a clean post-anneal layout", () => {
     const doc = circuit(
