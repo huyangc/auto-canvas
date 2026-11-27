@@ -5,13 +5,18 @@ import {
 } from "@icm/derived";
 import {
   createEmptyDocument,
+  freezeSnapshot,
   createRoutePath,
   type Point,
   type RouteEndpoint,
   type SchematicDocument,
 } from "@icm/model";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
-import { createRouteClearance } from "./route-clearance.js";
+import { compileWireDraft } from "./wire-draft.js";
+import {
+  orthogonalClearancePoints,
+  createRouteClearance,
+} from "./route-clearance.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
 function fixture() {
@@ -213,7 +218,11 @@ describe("clearance bounds preserve exhaustive results", () => {
     "chooses identical paths with crossing cost %s",
     (crossingCost) => {
       const document = fixture();
-      const [fast, exhaustive] = clearances(document, crossingCost);
+      const [fast] = clearances(
+        freezeSnapshot(structuredClone(document)),
+        crossingCost,
+      );
+      const [, exhaustive] = clearances(document, crossingCost);
       const pins = terminals(document);
       for (let index = 0; index < 36; index++) {
         const from = pins[index % pins.length]!.endpoint;
@@ -388,4 +397,132 @@ it("permits only an endpoint branch off a facing scalar Base Net contact", () =>
     owner: { kind: "global-declaration", sourceNetId: net.id },
   }));
   expect(check().conflict([start, side], [a, undefined])).toBeTruthy();
+});
+
+it("matches trimmed orthogonal wire drafts including reversals and pin escapes", () => {
+  const lattice = [
+    { x: 0, y: 0 },
+    { x: 10, y: 0 },
+    { x: -10, y: 0 },
+    { x: 0, y: 10 },
+    { x: 10, y: 10 },
+  ];
+  const geometry = (gridLanding: Point, escape: boolean) => ({
+    gridLanding,
+    contactPoint: escape
+      ? { x: gridLanding.x + 0.25, y: gridLanding.y }
+      : gridLanding,
+    escapePath: [],
+    outward: null,
+  });
+  for (const end of lattice)
+    for (const first of lattice)
+      for (const second of lattice)
+        for (const cornerOrder of [
+          "horizontal-first",
+          "vertical-first",
+        ] as const)
+          for (const startEscape of [false, true])
+            for (const endEscape of [false, true]) {
+              const a = geometry(lattice[0]!, startEscape),
+                b = geometry(end, endEscape);
+              const waypoints = [first, second];
+              const draft = compileWireDraft(
+                { connection: a },
+                { connection: b },
+                waypoints.map((point) => ({
+                  point,
+                  cornerOrder,
+                  routingMode: "orthogonal",
+                })),
+                "orthogonal",
+                cornerOrder,
+              );
+              const start = draft.segmentModes[0] === "escape" ? 1 : 0;
+              const trimEnd =
+                draft.segmentModes.at(-1) === "escape" &&
+                draft.points.length - 2 >= start;
+              expect(
+                orthogonalClearancePoints(a, b, waypoints, cornerOrder),
+              ).toStrictEqual(
+                draft.points.slice(start, trimEnd ? -1 : undefined),
+              );
+            }
+});
+
+it("preserves the first tied path and the cheapest blocked path diagnostic", () => {
+  const document = createEmptyDocument("ties", "Ties");
+  document.presentation.grid = 10;
+  freezeSnapshot(document);
+  const context = deriveNetConnectivityContext(document, resolver);
+  const start = { x: 0, y: 0 },
+    end = { x: 100, y: 100 };
+  for (const exhaustive of [false, true]) {
+    const own = {
+      logicalIds: new Set<string>(),
+      endpointKeys: new Set<string>(),
+      exhaustive,
+    };
+    expect(
+      createRouteClearance(document, resolver, context, own).path(start, end),
+    ).toMatchObject({
+      cornerOrder: "horizontal-first",
+      waypoints: [],
+      points: [start, { x: 100, y: 0 }, end],
+    });
+    const why = createRouteClearance(document, resolver, context, {
+      ...own,
+      blockedPoints: [start],
+    }).path(start, end);
+    expect(why).toBe(
+      "no clear path from (0, 0) to (100, 100): the direct one touches another Net's wire end at (0, 0) between (0, 0) and (100, 0). Move the parts apart, give a trunk, or name the Net at each end with a Net Label on a short stub",
+    );
+  }
+});
+
+it("refreshes pin geometry after editing a placement inside a shallow-frozen document", () => {
+  const document = Object.freeze(fixture());
+  const start = { x: 100, y: 0 },
+    end = { x: 101, y: 0 };
+  expect(clearances(document)[0].conflict([start, end], [])).toContain("B");
+  document.instances[1]!.placement!.position.x += 300;
+  expect(clearances(document)[0].conflict([start, end], [])).toBeNull();
+});
+
+it("reports the cheaper detour when both tiers are blocked", () => {
+  const document = createEmptyDocument("detour-reason", "Detour diagnostic");
+  document.presentation.grid = 10;
+  document.nets.push({ id: "foreign", terminals: [] });
+  document.junctions.push(
+    { id: "a", netId: "foreign", position: { x: 50, y: -5 } },
+    { id: "b", netId: "foreign", position: { x: 50, y: 25 } },
+  );
+  document.routes.push(
+    createRoutePath({
+      id: "wire",
+      netId: "foreign",
+      start: { kind: "junction", junctionId: "a" },
+      end: { kind: "junction", junctionId: "b" },
+      bends: [],
+      modes: ["manual"],
+    }),
+  );
+  freezeSnapshot(document);
+  const start = { x: 0, y: 0 },
+    end = { x: 100, y: 20 };
+  const context = deriveNetConnectivityContext(document, resolver);
+  for (const exhaustive of [true, false]) {
+    const clearance = createRouteClearance(document, resolver, context, {
+      exhaustive,
+      crossingCost: 200,
+      logicalIds: new Set(),
+      endpointKeys: new Set(),
+      blockedPoints: [start],
+    });
+    // The column along the foreign wire has no proper crossing penalty.
+    // It sorts before the plain Ls, then fails on that wire at its turn.
+    expect(clearance.path(start, end)).toBe(
+      "no clear path from (0, 0) to (100, 20): the direct one touches Route wire of a different Net (foreign) at (50, 0). Move the parts apart, give a trunk, or name the Net at each end with a Net Label on a short stub",
+    );
+  }
 });

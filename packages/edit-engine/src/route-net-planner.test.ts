@@ -1,6 +1,8 @@
 import {
   createEmptyDocument,
+  freezeSnapshot,
   createEmptyProject,
+  createRoutePath,
   type SchematicDocument,
 } from "@icm/model";
 import {
@@ -817,4 +819,55 @@ describe("route-net", () => {
       ).edits,
     ).toEqual([]);
   });
+});
+
+it("routes a twelve-pin net identically across mutable and frozen snapshots", () => {
+  const document = createEmptyDocument("fanout", "Fanout");
+  document.instances = Array.from({ length: 12 }, (_, i) => ({
+    id: `R${i}`,
+    reference: `R${i}`,
+    symbolId: "resistor",
+    placement: {
+      position: { x: 100 * (i % 6), y: 200 * Math.floor(i / 6) },
+      rotation: 0,
+      mirror: "none",
+    },
+  }));
+  const pins = document.instances.map(({ id }) => ({
+    instanceId: id,
+    pinName: "1",
+  }));
+  document.instances.push({
+    id: "obstacle",
+    symbolId: "resistor",
+    placement: { position: { x: 150, y: -20 }, rotation: 0, mirror: "none" },
+  });
+  document.nets.push(
+    { id: "other", terminals: [] },
+    { id: "fan", terminals: pins },
+  );
+  document.junctions.push(
+    { id: "top", netId: "other", position: { x: 250, y: -200 } },
+    { id: "bottom", netId: "other", position: { x: 250, y: 300 } },
+  );
+  document.routes.push(
+    createRoutePath({
+      id: "crossing",
+      netId: "other",
+      start: { kind: "junction", junctionId: "top" },
+      end: { kind: "junction", junctionId: "bottom" },
+      bends: [],
+      modes: ["manual"],
+    }),
+  );
+  const plan = (doc: SchematicDocument) =>
+    planRouteNet(doc, resolver, { target: { kind: "pins", pins } }, 128, {
+      crossingCost: 20,
+    });
+  const expected = plan(document);
+  expect(expected.unjoined ?? []).toEqual([]);
+  expect(expected.edits.length).toBeGreaterThanOrEqual(11);
+  expect(plan(freezeSnapshot(structuredClone(document)))).toStrictEqual(
+    expected,
+  );
 });
