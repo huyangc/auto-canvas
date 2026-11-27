@@ -1,3 +1,9 @@
+import {
+  MAX_CHANNEL_TRACKS,
+  discoverChannelTracks,
+  protectedObjects,
+} from "./global-route-order.js";
+import { railCrossingMetrics } from "./readability-rail-crossings.js";
 import { seatLabels } from "./seat-labels.js";
 import { planningMemo } from "./planning-reuse.js";
 import {
@@ -13,7 +19,7 @@ import {
 } from "@icm/edit-engine";
 import type { Point, SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { readabilityRegressed } from "./readability.js";
+import { readabilityCounts, readabilityRegressed } from "./readability.js";
 import { geometryProblem, pinPoints, withPlacements } from "./geometry.js";
 import { classifyNets } from "./net-roles.js";
 import { compareIds } from "./recognize.js";
@@ -36,71 +42,68 @@ import { calibratedScore, routedGuards } from "./routed-search-score.js";
 import { improvesReadability } from "./readability-selection.js";
 import type { AutoLayoutResult, Placement } from "./types.js";
 
-// Candidate tracks go through the outer pins, the centre, or one grid line
-// just outside the pin envelope. The router checks every trunk and branch.
-function* trunkTracks(points: Point[], grid: number, rails = false) {
-  yield undefined; // minimum spanning tree, against all retained conductors
-  for (const axis of ["x", "y"] as const) {
-    if (rails && axis === "x") continue;
-    const across = axis === "x" ? "y" : "x",
-      coords = points.map((p) => p[axis]),
-      ends = points.map((p) => p[across]);
-    const low = Math.min(...coords),
-      high = Math.max(...coords),
-      start = Math.min(...ends),
-      end = Math.max(...ends);
-    if (start === end) continue;
-    const tracks = new Set([
-      low,
-      high,
-      Math.round((low + high) / 2 / grid) * grid,
-      low - grid,
-      high + grid,
-    ]);
-    for (const track of tracks)
-      yield axis === "x"
-        ? { start: { x: track, y: start }, end: { x: track, y: end } }
-        : { start: { x: start, y: track }, end: { x: end, y: track } };
-  }
-}
-
-function protectedObjects(doc: SchematicDocument, movingPorts = false) {
-  const ids = new Set(
-    [...doc.layoutGroups, ...doc.constraints].flatMap((g) =>
-      !movingPorts || g.locked ? g.objectIds : [],
-    ),
+function* trunkTracks(
+  doc: SchematicDocument,
+  resolver: SymbolResolver,
+  points: Point[],
+  rails: boolean,
+  deep: boolean,
+) {
+  yield undefined;
+  const axes = (rails ? (["y"] as const) : (["x", "y"] as const)).map(
+    (axis) => {
+      const across = axis === "x" ? "y" : "x";
+      const ends = points.map((p) => p[across]);
+      const start = Math.min(...ends),
+        end = Math.max(...ends);
+      if (start === end) return [];
+      const coords = points.map((p) => p[axis]);
+      const low = Math.min(...coords),
+        high = Math.max(...coords);
+      const grid = doc.presentation.grid;
+      const tracks = deep
+        ? discoverChannelTracks(doc, resolver, points, axis, rails)
+        : [
+            ...new Set([
+              low,
+              high,
+              Math.round((low + high) / 2 / grid) * grid,
+              low - grid,
+              high + grid,
+            ]),
+          ];
+      return tracks.map((track) =>
+        axis === "x"
+          ? { start: { x: track, y: start }, end: { x: track, y: end } }
+          : { start: { x: start, y: track }, end: { x: end, y: track } },
+      );
+    },
   );
-  for (const anchor of [
-    ...doc.annotations
-      .filter((a) => !movingPorts || (a.locked && a.anchor.kind === "object"))
-      .map((a) => a.anchor),
-    ...(doc.drafting?.objects ?? []).flatMap((o) => [
-      o.anchor,
-      ...(o.kind === "arrow"
-        ? [o.from, o.to]
-        : "target" in o
-          ? [o.target]
-          : []),
-    ]),
-  ]) {
-    if (anchor.kind === "object") ids.add(anchor.objectId);
-    if (anchor.kind === "route") ids.add(anchor.routeId);
+  if (!deep) {
+    for (const tracks of axes) yield* tracks;
+    return;
   }
-  return ids;
+  let count = 0;
+  for (let i = 0; i < Math.max(...axes.map((a) => a.length)); i++)
+    for (const tracks of axes) {
+      if (count === MAX_CHANNEL_TRACKS) return;
+      if (tracks[i]) {
+        count++;
+        yield tracks[i];
+      }
+    }
 }
 
-/** One local pass on at most three crossed signal nets of the finished layout.
- * Other geometry remains an obstacle. Never sacrifice a connection, a bend or
- * wire length for a nominal crossing gain; ties leave the original edits intact. */
 export function rerouteCrossings(
   source: SchematicDocument,
   resolver: SymbolResolver,
   result: AutoLayoutResult,
   stopped: () => boolean,
   final?: SchematicDocument,
+  { deep = false } = {},
 ): AutoLayoutResult {
   if (final && !auditRouting(final, resolver).crossings) return result;
-  return rerouteNets(source, resolver, result, stopped, undefined, final);
+  return rerouteNets(source, resolver, result, stopped, deep, undefined, final);
 }
 
 /** R148: reconsider crossed rails against the finished signal geometry. */
@@ -111,7 +114,7 @@ export function rerouteRailCrossings(
   stopped: () => boolean,
   finish: (result: AutoLayoutResult) => AutoLayoutResult,
 ): AutoLayoutResult {
-  return rerouteNets(source, resolver, result, stopped, finish);
+  return rerouteNets(source, resolver, result, stopped, true, finish);
 }
 
 function rerouteNets(
@@ -119,6 +122,7 @@ function rerouteNets(
   resolver: SymbolResolver,
   result: AutoLayoutResult,
   stopped: () => boolean,
+  deep: boolean,
   finish?: (result: AutoLayoutResult) => AutoLayoutResult,
   final?: SchematicDocument,
 ): AutoLayoutResult {
@@ -163,18 +167,52 @@ function rerouteNets(
     audit.unsafeProblems.length
   )
     return result;
-  const rejectRouting = (final: SchematicDocument, next: typeof audit) =>
-    next.unsafeProblems.length > 0 ||
-    ((next.crossings > audit.crossings ||
-      next.bends > audit.bends ||
-      next.wireLength > audit.wireLength ||
-      (next.crossings === audit.crossings &&
-        next.bends === audit.bends &&
-        next.wireLength === audit.wireLength)) &&
-      !improvesReadability(doc, final, resolver));
+  const railCount = (d: SchematicDocument) =>
+    deep
+      ? planningMemo(
+          d,
+          resolver,
+          "reroute-rail-count",
+          () =>
+            railCrossingMetrics(d, resolver, classifyNets(d, resolver).rails)
+              .violations,
+        )
+      : 0;
+  let bestRails = railCount(doc);
+  const rejectRouting = (final: SchematicDocument, next: typeof audit) => {
+    if (next.unsafeProblems.length) return true;
+    const railDrop = bestRails - railCount(final);
+    if (railDrop < 0 && (rails || !improvesReadability(doc, final, resolver)))
+      return true;
+    const drop = Math.max(audit.crossings - next.crossings, railDrop);
+    if (deep && drop > 0) {
+      if (
+        next.crossings > audit.crossings &&
+        !improvesReadability(doc, final, resolver)
+      )
+        return true;
+      if (
+        next.bends > audit.bends + 4 * drop ||
+        next.wireLength >
+          audit.wireLength + Math.max(8, 24 * drop) * doc.presentation.grid
+      )
+        return true;
+      return false;
+    }
+    return (
+      (next.crossings > audit.crossings ||
+        next.bends > audit.bends ||
+        next.wireLength > audit.wireLength ||
+        (next.crossings === audit.crossings &&
+          next.bends === audit.bends &&
+          next.wireLength === audit.wireLength)) &&
+      !improvesReadability(doc, final, resolver)
+    );
+  };
+  const trialCap = deep ? Math.min(rails ? 4 : 8, Math.max(3, counts.size)) : 3;
   let trials = 0;
   for (const netId of keys) {
-    if (trials === 3 || stopped() || !audit.crossings) break;
+    if (trials === trialCap || stopped() || !audit.crossings) break;
     if (
       rails
         ? !roles.rails.has(netId)
@@ -234,11 +272,13 @@ function rerouteNets(
           result: AutoLayoutResult;
           final: SchematicDocument;
           score: number;
+          railCrossings: number;
+          labelClearance: number;
           audit: typeof audit;
         }
       | undefined;
     const reservedKey = JSON.stringify([...reserved]);
-    for (const trunk of trunkTracks(coords, doc.presentation.grid, rails)) {
+    for (const trunk of trunkTracks(doc, resolver, coords, rails, deep)) {
       if (stopped()) break;
       const request = {
         target: { kind: "pins" as const, pins: group.pins },
@@ -268,13 +308,17 @@ function rerouteNets(
         // Rank tracks against the retained wires first. A winner still has to
         // pass every guard on the complete transaction replay below.
         const incremental = preview(cleared.document, resolver, routed.edits);
+        const incScore = score(incremental.document);
         if (
           incremental.ok &&
           (rejectRouting(
             incremental.document,
             auditRouting(incremental.document, resolver),
           ) ||
-            score(incremental.document) >= (winner?.score ?? bestScore))
+            incScore >= bestScore ||
+            (winner &&
+              (!deep || winner.labelClearance === 0) &&
+              incScore >= winner.score))
         )
           continue;
       }
@@ -305,11 +349,33 @@ function rerouteNets(
       )
         continue;
       const value = score(final);
+      const railCrossings = railCount(final);
+      const labelClearance = deep
+        ? readabilityCounts(final, resolver).labelClearance
+        : 0;
+      const beatsWinner =
+        !winner ||
+        (rails && railCrossings < winner.railCrossings) ||
+        ((!rails || railCrossings === winner.railCrossings) &&
+          (deep &&
+          next.crossings === winner.audit.crossings &&
+          railCrossings === winner.railCrossings &&
+          labelClearance !== winner.labelClearance
+            ? labelClearance < winner.labelClearance
+            : value < winner.score));
       if (
-        value < (winner?.score ?? bestScore) &&
+        value < bestScore &&
+        beatsWinner &&
         !readabilityRegressed(doc, final, resolver)
       )
-        winner = { result: candidate, final, score: value, audit: next };
+        winner = {
+          result: candidate,
+          final,
+          score: value,
+          audit: next,
+          railCrossings,
+          labelClearance,
+        };
     }
     if (winner) {
       if (rails) result = winner.result;
@@ -317,6 +383,7 @@ function rerouteNets(
       doc = winner.final;
       remaining = crossingsByNet(doc, resolver);
       audit = winner.audit;
+      bestRails = winner.railCrossings;
       bestScore = winner.score;
       if (guards) guards = routedGuards(doc, resolver);
       for (const id of documentObjectIds(doc)) reserved.add(id);

@@ -1,3 +1,4 @@
+import { railCrossingMetrics } from "./readability-rail-crossings.js";
 import { preferPowerFlow } from "./netlist-power-flow.js";
 import { selectDifferentialStageColumns } from "./differential-stage-columns.js";
 import { selectNetlistPortSides } from "./netlist-port-sides.js";
@@ -26,6 +27,7 @@ import {
   shouldFinishRunner,
   type FinalistPass,
 } from "./finished-selection.js";
+import { readabilityRegressed } from "./readability.js";
 import { improvesReadability } from "./readability-selection.js";
 import { localRailMarkers } from "./local-rail-markers.js";
 import { netlistPresentation } from "./netlist-presentation.js";
@@ -59,6 +61,8 @@ import {
   type SchematicEdit,
 } from "@icm/edit-engine";
 import {
+  diagnoseVisualQuality,
+  resolveRouteGeometry,
   createLabelClearanceContext,
   deriveElectricalTopologyProjection,
   endpointKey,
@@ -212,6 +216,7 @@ export function defaultLayoutSearch(
 }
 
 interface LevelOptions extends AutoLayoutOptions {
+  negotiated?: boolean;
   aprAttempt?: { started: boolean };
   pitch?: Readonly<PlacementPitch>;
   seriesLevels?: boolean;
@@ -433,13 +438,167 @@ function planDocument(
               options,
             ),
           );
-        const best = finish(selectFinalLayout(document, resolver, options));
+        const selected = selectFinalLayout(document, resolver, options);
+        const best = routeSelectedFinalist(
+          document,
+          resolver,
+          options,
+          finish(selected),
+          finish,
+        );
         return input === "drawing"
           ? preserveDrawnSymmetry(document, resolver, options, best, finish)
           : refineNetlistPlacement(document, resolver, options, best, finish);
       }),
     ),
   );
+}
+
+/** Run the expensive routing alternatives once, after all seat and portfolio trials. */
+function routeSelectedFinalist(
+  source: SchematicDocument,
+  resolver: SymbolResolver,
+  options: LevelOptions,
+  incumbent: AutoLayoutResult,
+  finish: (result: AutoLayoutResult) => AutoLayoutResult,
+): AutoLayoutResult {
+  const stopped = () =>
+    !!options.search?.signal?.aborted ||
+    (options.search?.deadline !== undefined &&
+      Date.now() >= options.search.deadline);
+  if (options.partition || options.search?.evaluations === 0 || stopped())
+    return incumbent;
+  let final = finishedDocument(source, resolver, incumbent);
+  if (!final || !auditRouting(final, resolver).crossings) return incumbent;
+  const finishLabels = (result: AutoLayoutResult) =>
+    separateLabels(
+      source,
+      resolver,
+      followDraftingLabels(source, resolver, result),
+      options,
+    );
+  const negotiated = negotiateFinalist(
+    source,
+    resolver,
+    options,
+    incumbent,
+    final,
+    (result) => finish(finishLabels(result)),
+    stopped,
+  );
+  incumbent = negotiated.result;
+  final = negotiated.final;
+  if (stopped() || !auditRouting(final, resolver).crossings) return incumbent;
+  const priorEdits = incumbent.edits;
+  const rawSignals = rerouteCrossings(
+    source,
+    resolver,
+    { ...incumbent },
+    stopped,
+    final,
+    { deep: true },
+  );
+  const signals =
+    rawSignals.edits === priorEdits
+      ? incumbent
+      : keepIntactReroute(
+          source,
+          resolver,
+          incumbent,
+          finishLabels(rawSignals),
+        );
+  const routed = finishedDocument(source, resolver, signals);
+  if (
+    !routed ||
+    stopped() ||
+    !auditRouting(routed, resolver).crossings ||
+    !railCrossingMetrics(routed, resolver, classifyNets(routed, resolver).rails)
+      .violations
+  )
+    return signals;
+  return keepIntactReroute(
+    source,
+    resolver,
+    signals,
+    rerouteRailCrossings(source, resolver, signals, stopped, finishLabels),
+  );
+}
+
+function negotiateFinalist(
+  source: SchematicDocument,
+  resolver: SymbolResolver,
+  options: LevelOptions,
+  result: AutoLayoutResult,
+  final: SchematicDocument,
+  finishLabels: (result: AutoLayoutResult) => AutoLayoutResult,
+  stopped: () => boolean,
+) {
+  const before = { result, final, choices: emptyChoices() };
+  // Rebuilding from source cannot reproduce a finalist's added rail markers
+  // or its selected diagonal X. Local track trials retain those trees.
+  if (
+    source.instances.length !== final.instances.length ||
+    final.routes.some((r) =>
+      resolveRouteGeometry(final, resolver, r)?.segments.some(
+        (s) => s.from.x !== s.to.x && s.from.y !== s.to.y,
+      ),
+    )
+  )
+    return before;
+  const trial = planLayoutOnce(
+    source,
+    resolver,
+    { ...options, negotiated: true },
+    emptyOverrides(),
+    refinementMetrics(result)?.strategy,
+    true,
+    undefined,
+    undefined,
+    new Map(final.instances.map((i) => [i.id, i.placement!])),
+    true,
+    false,
+    contactPolicy(source, freezePinGroups(source, resolver), true),
+    undefined,
+    draftingTranslation(result),
+  );
+  if (!trial.final || stopped()) return before;
+  const candidate = finishLabels(
+    finalizeFacing(source, resolver, options, trial.result),
+  );
+  const after = finishedDocument(source, resolver, candidate);
+  if (
+    !after ||
+    !connectionsIntact(after, resolver) ||
+    auditRouting(after, resolver).unsafeProblems.length ||
+    terminalPartition(final, resolver) !== terminalPartition(after, resolver) ||
+    lostNameClaim(final, after)
+  )
+    return before;
+  const run = { result: candidate, final: after, choices: trial.choices };
+  if (
+    (auditRouting(after, resolver).crossings >
+      auditRouting(final, resolver).crossings &&
+      !improvesReadability(final, after, resolver)) ||
+    compareRuns(
+      run,
+      before,
+      resolver,
+      source.instances.length > 40 ? routedScore : calibratedScore,
+    ) >= 0 ||
+    readabilityRegressed(final, after, resolver) ||
+    aprGuardsRegressed(final, after, resolver)
+  )
+    return before;
+  const guards = routedGuards(final, resolver);
+  if (
+    Object.entries(routedGuards(after, resolver)).some(
+      ([key, count]) => count > (guards[key] ?? 0),
+    ) ||
+    keepIntactReroute(source, resolver, result, candidate) !== candidate
+  )
+    return before;
+  retainRefinementMetrics(run, result, resolver);
+  return run;
 }
 
 function refineNetlistPlacement(
@@ -1341,9 +1500,25 @@ export function aprGuardsRegressed(
   ];
   const baseGuards = routedGuards(before, resolver);
   const afterGuards = routedGuards(after, resolver);
+  if (afterGuards.VISUAL_CONSTRAINT_VIOLATION) {
+    const violated = (doc: SchematicDocument) =>
+      diagnoseVisualQuality(doc, resolver)
+        .filter((d) => d.code === "VISUAL_CONSTRAINT_VIOLATION")
+        .map((d) => d.objectIds[0]);
+    const previous = new Set(violated(before));
+    if (violated(after).some((id) => !previous.has(id))) return true;
+  }
   return criticalGuards.some(
     (key) => (afterGuards[key] ?? 0) > (baseGuards[key] ?? 0),
   );
+}
+
+/** @internal Both finished-seat and finalist caches depend on the active placement limits. */
+export function finalistCacheKey(
+  bounds: SearchBounds | undefined,
+  inputs: unknown[],
+) {
+  return JSON.stringify([bounds ?? null, ...inputs]);
 }
 
 function planAutoLayoutMeasured(
@@ -2556,7 +2731,7 @@ function planAutoLayoutMeasured(
       // Symmetry and finishing budget change which movements are licensed. Keep
       // each polishing context and its drafting origin independent.
       const reducedBudget = options.attachmentDraft ?? false;
-      const polishKey = JSON.stringify([
+      const polishKey = finalistCacheKey(repairBounds, [
         contactResult,
         draftingTranslation(contactResult),
         options.unsplitSymmetry,
@@ -2641,7 +2816,7 @@ function planAutoLayoutMeasured(
       ) => {
         if (!preservesSymmetry(placements)) return initial;
         const cache = finishedSeats;
-        const key = JSON.stringify([
+        const key = finalistCacheKey(repairBounds, [
           strategy,
           options.unsplitSymmetry,
           options.mirrorSymmetry,
@@ -2767,18 +2942,7 @@ function planAutoLayoutMeasured(
           ),
         ),
       );
-      const routed = keepIntactReroute(
-        document,
-        resolver,
-        railed.result,
-        rerouteRailCrossings(
-          document,
-          resolver,
-          railed.result,
-          stopped,
-          finishLabels,
-        ),
-      );
+      const routed = railed.result;
       const final = preview(document, resolver, routed.edits);
       if (!final.ok) return routed;
       // R149 compares gaps against the completed port/rail incumbent. Closing
@@ -3415,6 +3579,7 @@ function buildPlan(
       [...result.placements].sort(([a], [b]) => compareIds(a, b)),
       signalTrunks,
       ripUp,
+      !!options.negotiated,
       crossX,
       !!contacts,
     ]);
@@ -3588,10 +3753,12 @@ function buildPlan(
     signalTrunks,
     {
       ripUp,
+      ...(options.negotiated ? { negotiated: true } : {}),
       ...(crossX ? { crossX } : {}),
       ...(contacts ? { sharedLandings: true } : {}),
     },
     documentObjectIds(document),
+    options.search,
   );
   if (routed.problem) return refuse(routed.problem);
   edits.push(...routed.edits);
