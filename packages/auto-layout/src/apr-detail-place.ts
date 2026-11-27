@@ -1,3 +1,9 @@
+import {
+  runLnsRuinRecreate,
+  type HotEdge,
+  type AprUnit,
+} from "./lns-recreate.js";
+import { stackPairs, stackHolds, stackClear } from "./stack-snap.js";
 import { deviceDescriptor } from "@icm/devices";
 import { visibleInstanceBounds } from "@icm/derived";
 import {
@@ -41,13 +47,6 @@ const MAX_PROXY_EVALS = 1600;
 const MIN_CLEARANCE = 20;
 const WINDOW_SIZE = 4;
 
-interface AprUnit {
-  id: string;
-  members: string[];
-  fixed: boolean;
-  hasGroupOrSymmetry: boolean;
-}
-
 interface NetPinRef {
   instanceId: string;
   at: Point;
@@ -67,7 +66,7 @@ interface MstEdge {
 }
 
 export interface AprCandidate {
-  kind: "orient" | "macro" | "row" | "combined";
+  kind: "lns" | "stack" | "orient" | "macro" | "row" | "combined";
   placements: Map<string, Placement>;
   score: number;
   crossings: number;
@@ -179,7 +178,10 @@ function segmentIntrudesBox(
  * - Collinear horizontal/vertical alternating-interval crossings (detects 1D
  *   channel crossings along a single row or column strip).
  */
-function topologicalEdgeCrossings(edges: readonly MstEdge[]): number {
+function topologicalEdgeCrossings(
+  edges: readonly MstEdge[],
+  onCross?: (i: number, j: number) => void,
+): number {
   let count = 0;
   const n = edges.length;
   for (let i = 0; i < n; i++) {
@@ -200,8 +202,10 @@ function topologicalEdgeCrossings(edges: readonly MstEdge[]): number {
         if (
           (a.minX < b.minX && b.minX < a.maxX && a.maxX < b.maxX) ||
           (b.minX < a.minX && a.minX < b.maxX && b.maxX < a.maxX)
-        )
+        ) {
           count++;
+          onCross?.(i, j);
+        }
         continue;
       }
       // Collinear vertical strip: count strictly interleaved intervals.
@@ -209,8 +213,10 @@ function topologicalEdgeCrossings(edges: readonly MstEdge[]): number {
         if (
           (a.minY < b.minY && b.minY < a.maxY && a.maxY < b.maxY) ||
           (b.minY < a.minY && a.minY < b.maxY && b.maxY < a.maxY)
-        )
+        ) {
           count++;
+          onCross?.(i, j);
+        }
         continue;
       }
       // Proper 2D segment intersection via signed area orientation test.
@@ -221,7 +227,10 @@ function topologicalEdgeCrossings(edges: readonly MstEdge[]): number {
           (a.bx - a.ax) * (b.ay - a.ay) - (a.by - a.ay) * (b.ax - a.ax);
         const d4 =
           (a.bx - a.ax) * (b.by - a.ay) - (a.by - a.ay) * (b.bx - a.ax);
-        if ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0)) count++;
+        if ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0)) {
+          count++;
+          onCross?.(i, j);
+        }
       }
     }
   }
@@ -254,6 +263,7 @@ function extractAprUnits(
   );
   const placedById = new Map(placed.instances.map((i) => [i.id, i]));
 
+  const pairs = stackPairs(devices, resolver, roles);
   // Keep already-aligned vertical conducting stacks intact as rigid units.
   const stacks: [string, string][] = [];
   for (const net of document.nets) {
@@ -375,7 +385,7 @@ function extractAprUnits(
     })
     .sort((a, b) => compareIds(a.id, b.id));
 
-  return { devices, roles, units: aprUnits };
+  return { devices, roles, stacks: pairs, units: aprUnits };
 }
 
 /** Whether a single device can safely mirror top-bottom without inverting
@@ -384,6 +394,7 @@ function canMirrorVertical(
   instance: Instance,
   resolver: SymbolResolver,
   roles: NetRoles,
+  pose: Placement,
 ): boolean {
   const cls = deviceDescriptor(instance.symbolId)?.deviceClass;
   if (
@@ -407,11 +418,7 @@ function canMirrorVertical(
   return !pins.some((pin) => {
     const net = roles.pinNet(instance.id, pin.name);
     if (!net || !roles.rails.has(net)) return false;
-    const exit = pinExit(pin, {
-      position: { x: 0, y: 0 },
-      rotation: 0,
-      mirror: "none",
-    });
+    const exit = pinExit(pin, pose);
     return exit.y !== 0;
   });
 }
@@ -464,7 +471,7 @@ export function aprDetailPlace(
     };
   }
 
-  const { devices, roles, units } = extractAprUnits(
+  const { devices, roles, units, stacks } = extractAprUnits(
     document,
     placed,
     resolver,
@@ -512,6 +519,39 @@ export function aprDetailPlace(
     initial.set(d.id, structuredClone(inst.placement));
   }
 
+  const unitOf = new Map(
+    units.flatMap((u) => u.members.map((id) => [id, u] as const)),
+  );
+  const orientations = (unit: AprUnit, pose: Placement) => {
+    if (unit.members.length > 1 || unit.hasGroupOrSymmetry) return [pose];
+    const dev = deviceById.get(unit.id)!;
+    const horizontal = { ...pose, ...reflectOrientation(pose, "left-right") };
+    const states = [pose, horizontal];
+    if (canMirrorVertical(dev, resolver, roles, pose))
+      states.push(
+        ...states.map((p) => ({
+          ...p,
+          ...reflectOrientation(p, "top-bottom"),
+        })),
+      );
+    const channel = channelPins(dev.symbolId);
+    return states.filter(
+      (p) =>
+        (!rightFacing.has(dev.id) || !outputFacesLeft(dev, p, resolver)) &&
+        (!channel ||
+          devicePinsById
+            .get(dev.id)!
+            .filter(
+              (pin) =>
+                pin.name === channel.drain || pin.name === channel.source,
+            )
+            .every((pin) => {
+              const a = pinExit(pin, pose),
+                b = pinExit(pin, p);
+              return a.x === b.x && a.y === b.y;
+            })),
+    );
+  };
   // Cache local visible bounding boxes per (deviceId, rotation, mirror).
   const localBoxCache = new Map<string, DerivedRect>();
   const localBox = (
@@ -652,15 +692,17 @@ export function aprDetailPlace(
       activeNets.push(devPins);
     }
   }
-  // Scale proxy evaluation budget inversely with O(E^2) pairwise crossing cost
-  // so dense multi-hundred-net graphs stay bounded deterministically within the
-  // latency target while normal schematics (<=110 edges) keep the full budget.
+  // Bound both pairwise device legalization and MST crossing work. Small
+  // schematics retain the full portfolio.
   const totalMstEdges = activeNets.reduce(
     (sum, pins) => sum + Math.max(0, pins.length - 1),
     0,
   );
   const maxProxyEvals = Math.min(
     MAX_PROXY_EVALS,
+    devices.length > 100
+      ? Math.max(32, Math.floor(480000 / devices.length ** 2))
+      : MAX_PROXY_EVALS,
     Math.max(
       40,
       Math.floor(20_000_000 / Math.max(1, totalMstEdges * totalMstEdges)),
@@ -692,14 +734,21 @@ export function aprDetailPlace(
   }
 
   let evaluations = 0;
-  const evaluatePoses = (poses: ReadonlyMap<string, Placement>): ProxyEval => {
+  const evaluatePoses = (
+    poses: ReadonlyMap<string, Placement>,
+    hotspot?: HotEdge[],
+  ): ProxyEval => {
     evaluations++;
     const edges: MstEdge[] = [];
     let length = 0;
     let exitPenalty = 0;
 
     for (let netIdx = 0; netIdx < activeNets.length; netIdx++) {
-      const pins = activeNets[netIdx]!;
+      const pins =
+        poses.size === devices.length
+          ? activeNets[netIdx]!
+          : activeNets[netIdx]!.filter((p) => poses.has(p.instanceId));
+      if (pins.length < 2) continue;
       const n = pins.length;
       const pts: Array<{ x: number; y: number; ex: number; ey: number }> = [];
       let sumX = 0,
@@ -727,6 +776,12 @@ export function aprDetailPlace(
         if (step > 0) {
           const a = pts[parent[next]!]!;
           length += dist[next]!;
+          hotspot?.push({
+            from: pins[parent[next]!]!.instanceId,
+            to: pins[next]!.instanceId,
+            hits: 0,
+            neighbors: new Set(),
+          });
           edges.push({
             net: netIdx,
             ax: a.x,
@@ -757,11 +812,24 @@ export function aprDetailPlace(
       }
     }
 
-    const crossings = topologicalEdgeCrossings(edges);
+    const crossings = topologicalEdgeCrossings(
+      edges,
+      hotspot
+        ? (i, j) => {
+            const a = hotspot[i]!,
+              b = hotspot[j]!;
+            a.hits++;
+            b.hits++;
+            a.neighbors.add(b.from).add(b.to);
+            b.neighbors.add(a.from).add(a.to);
+          }
+        : undefined,
+    );
     // Count MST chords that cut straight through substantial device bodies
     // (width & height >= 40, e.g. multi-pin macro blocks and active cells),
     // penalizing pin orientations that force U-turns around a macro body.
     const boxes = devices
+      .filter((d) => poses.has(d.id))
       .map((d) => worldBox(d.id, poses))
       .filter((box) => box.width >= 40 && box.height >= 40);
     let bodyIntrusions = 0;
@@ -779,6 +847,7 @@ export function aprDetailPlace(
     }
     let flowPenalty = 0;
     for (const { from, to } of flowEdges) {
+      if (!poses.has(from) || !poses.has(to)) continue;
       const a = poses.get(from)!.position.x;
       const b = poses.get(to)!.position.x;
       if (b < a - 20) flowPenalty += 0.05;
@@ -789,6 +858,11 @@ export function aprDetailPlace(
       length,
       score:
         crossings * 3.0 +
+        stacks.filter(
+          (s) =>
+            poses.has(s.a.id) && poses.has(s.b.id) && !stackHolds(s, poses),
+        ).length *
+          0.5 +
         bodyIntrusions * 0.9 +
         length / 1000 +
         exitPenalty +
@@ -805,6 +879,7 @@ export function aprDetailPlace(
     movedIds: ReadonlySet<string>,
     internalClearance = MIN_CLEARANCE,
   ): boolean => {
+    legalizationAttempts++;
     const movedBoxes = [...movedIds].map((id) => ({
       id,
       box: worldBox(id, poses),
@@ -817,16 +892,18 @@ export function aprDetailPlace(
       }
     }
     for (const d of devices) {
-      if (movedIds.has(d.id)) continue;
+      if (movedIds.has(d.id) || !poses.has(d.id)) continue;
       const other = worldBox(d.id, poses);
       for (const a of movedBoxes) {
         if (boxesOverlap(a.box, other, 0)) return true;
       }
     }
     const pinKeys = new Set<string>();
+    const carriedSeats = new Set<string>();
     const reservedMarkerSeats = new Set<string>();
     for (const d of devices) {
-      const p = poses.get(d.id)!;
+      const p = poses.get(d.id);
+      if (!p) continue;
       for (const pin of devicePinsById.get(d.id)!) {
         const pt = transformPoint(pin.at, p.position, p);
         const key = `${Math.round(pt.x)},${Math.round(pt.y)}`;
@@ -840,10 +917,13 @@ export function aprDetailPlace(
           const seatY =
             Math.round(pt.y) +
             (rp.rail === "ground" ? railStubOffset : -railStubOffset);
-          reservedMarkerSeats.add(`${Math.round(pt.x)},${seatY}`);
+          const key = `${Math.round(pt.x)},${seatY}`;
+          reservedMarkerSeats.add(key);
+          if (movedIds.has(d.id)) carriedSeats.add(key);
         }
       }
     }
+    for (const seat of carriedSeats) if (pinKeys.has(seat)) return true;
     // Reject if a moved device places any pin directly onto a rail marker seat.
     for (const id of movedIds) {
       const p = poses.get(id)!;
@@ -856,8 +936,14 @@ export function aprDetailPlace(
     return false;
   };
 
+  const maxLegalizationAttempts =
+    devices.length > 100 ? 1200 : Math.max(6000, maxProxyEvals * 6);
+  let legalizationAttempts = 0;
+  let stageLimit = Math.ceil(maxProxyEvals * 0.2);
   const budgetExhausted = () =>
-    evaluations >= maxProxyEvals || Boolean(options?.stopped?.());
+    evaluations >= stageLimit ||
+    legalizationAttempts >= maxLegalizationAttempts ||
+    Boolean(options?.stopped?.());
   if (budgetExhausted()) {
     return {
       placements: initial,
@@ -900,14 +986,14 @@ export function aprDetailPlace(
         ? transformPoint(anchorPin.at, curPose.position, curPose)
         : undefined;
 
-      const verticalOk = canMirrorVertical(dev, resolver, roles);
-      const mirrorStates: Placement["mirror"][] = verticalOk
-        ? ["none", "horizontal", "vertical", "both"]
-        : ["none", "horizontal"];
-
       let bestLocalPose: Placement | undefined;
       let bestLocalEval = bestEval;
-      for (const mirror of mirrorStates) {
+      // The orientation pass may restore a transistor to its native channel
+      // order after column reflection. LNS keeps the chosen channel exits.
+      const mirrors = ch
+        ? (["none", "horizontal"] as const)
+        : orientations(unit, curPose).map((p) => p.mirror);
+      for (const mirror of mirrors) {
         if (budgetExhausted()) break;
         if (mirror === curPose.mirror) continue;
         const candidateOrient = { rotation: curPose.rotation, mirror };
@@ -1173,7 +1259,14 @@ export function aprDetailPlace(
         end < columns.length ? columns[end]!.box.x - MIN_CLEARANCE : undefined;
       const runMembers = new Set(order.flatMap((c) => c.members));
 
+      // Packing fixes every column's left edge from its order and rounded
+      // width. Revisiting an order therefore recreates the same placement.
+      const triedOrders = new Set<string>();
       const applyOrder = (candidate: ColumnCluster[]): boolean => {
+        const key = candidate.map((c) => columns.indexOf(c)).join(",");
+        if (triedOrders.has(key)) return false;
+        triedOrders.add(key);
+        legalizationAttempts++;
         const trial = packRun(candidate, startX, maxRight);
         if (!trial) return false;
         if (tryAccept(trial, runMembers, 0)) {
@@ -1436,6 +1529,17 @@ export function aprDetailPlace(
     return { poses: best, eval: bestEval, changed };
   };
 
+  const clearStacks = (poses: Map<string, Placement>) => {
+    const aligned = stacks.filter((s) => stackHolds(s, poses));
+    if (!aligned.length) return [];
+    const bounds = new Map(
+      devices
+        .filter((d) => poses.has(d.id))
+        .map((d) => [d.id, worldBox(d.id, poses)]),
+    );
+    return aligned.filter((s) => stackClear(s, poses, bounds));
+  };
+  const initiallyClear = clearStacks(initial);
   // Collect distinct, legalized phase candidates.
   const collected: AprCandidate[] = [];
   const seenSigs = new Set<string>([placementSignature(devices, initial)]);
@@ -1444,7 +1548,13 @@ export function aprDetailPlace(
     poses: Map<string, Placement>,
     ev: ProxyEval,
   ) => {
-    if (ev.score >= beforeEval.score - 1e-6) return;
+    if (
+      ev.score >= beforeEval.score - 1e-6 &&
+      (kind !== "lns" || ev.crossings >= beforeEval.crossings)
+    )
+      return;
+    const clear = clearStacks(poses);
+    if (initiallyClear.some((s) => !clear.includes(s))) return;
     const sig = placementSignature(devices, poses);
     if (seenSigs.has(sig)) return;
     if (geometryProblem(withPlacements(deviceDoc, poses), resolver)) return;
@@ -1477,14 +1587,7 @@ export function aprDetailPlace(
     const curBox = worldBox(id, initial);
     const cx = curBox.x + curBox.width / 2;
     const cy = curBox.y + curBox.height / 2;
-    const states: Placement["mirror"][] = canMirrorVertical(
-      dev,
-      resolver,
-      roles,
-    )
-      ? ["none", "horizontal", "vertical", "both"]
-      : ["none", "horizontal"];
-    for (const mirror of states) {
+    for (const { mirror } of orientations(unitOf.get(id)!, curPose)) {
       if (budgetExhausted()) break;
       if (mirror === curPose.mirror) continue;
       const orient = { rotation: curPose.rotation, mirror };
@@ -1515,6 +1618,7 @@ export function aprDetailPlace(
     : runOrientPass(initial, beforeEval);
   if (orient1.changed) record("orient", orient1.poses, orient1.eval);
 
+  stageLimit = Math.ceil(maxProxyEvals * 0.8);
   const macro1 = budgetExhausted()
     ? { poses: orient1.poses, eval: orient1.eval, changed: false }
     : runMacroColumnPass(orient1.poses, orient1.eval);
@@ -1525,6 +1629,7 @@ export function aprDetailPlace(
   if (macro1.changed || macroOriented.changed)
     record("macro", macroOriented.poses, macroOriented.eval);
 
+  stageLimit = Math.ceil(maxProxyEvals * 0.89);
   // Track B: Windowed Row Detail Place directly on initial (preserves macro columns)
   if (!budgetExhausted()) {
     const rowOnly = runWindowedRowPass(initial, beforeEval);
@@ -1545,6 +1650,150 @@ export function aprDetailPlace(
       record("combined", combinedFinal.poses, combinedFinal.eval);
   }
 
+  const leader = collected.reduce<AprCandidate | undefined>(
+    (best, c) => (!best || best.score > c.score ? c : best),
+    undefined,
+  );
+  let base = leader?.placements ?? initial;
+  let ev: ProxyEval = leader ?? beforeEval;
+  // Pin-to-pin translations are shared by stack snapping and constructive seats.
+  const stackSteps = (
+    u: AprUnit,
+    poses: Map<string, Placement>,
+    clear = clearStacks(poses),
+  ) =>
+    stacks.flatMap((stack) => {
+      const mover = u.members.includes(stack.a.id) ? stack.a : stack.b;
+      const anchor = mover === stack.a ? stack.b : stack.a;
+      const p = poses.get(mover.id),
+        q = poses.get(anchor.id);
+      if (
+        !p ||
+        !q ||
+        !u.members.includes(mover.id) ||
+        u.members.includes(anchor.id) ||
+        clear.includes(stack)
+      )
+        return [];
+      const a = transformPoint(mover.pin.at, p.position, p),
+        b = transformPoint(anchor.pin.at, q.position, q);
+      const from = pinExit(mover.pin, p),
+        exit = pinExit(anchor.pin, q);
+      if (from.x !== -exit.x || from.y !== -exit.y) return [];
+      return [1, 2, 3].map((gap) => ({
+        x: b.x - a.x + gap * grid * exit.x,
+        y: b.y - a.y + gap * grid * exit.y,
+      }));
+    });
+  stageLimit = Math.ceil(maxProxyEvals * 0.92);
+  let clearBase = clearStacks(base);
+  for (const u of units
+    .filter(
+      (u) =>
+        !u.fixed &&
+        stacks.some(
+          (s) => unitOf.get(s.a.id) === u || unitOf.get(s.b.id) === u,
+        ),
+    )
+    .sort((a, b) => a.members.length - b.members.length)) {
+    if (budgetExhausted()) break;
+    const original = base;
+    for (const step of stackSteps(u, original, clearBase)) {
+      if (budgetExhausted()) break;
+      const trial = new Map(original);
+      for (const id of u.members) {
+        const p = original.get(id)!;
+        trial.set(id, {
+          ...p,
+          position: {
+            x: p.position.x + snap(step.x),
+            y: p.position.y + snap(step.y),
+          },
+        });
+      }
+      if (movedHasConflict(trial, new Set(u.members), 0)) continue;
+      const held = clearBase,
+        clear = clearStacks(trial);
+      if (clear.length <= held.length || held.some((s) => !clear.includes(s)))
+        continue;
+      const next = evaluatePoses(trial);
+      if (next.crossings <= ev.crossings && next.score < ev.score) {
+        clearBase = clear;
+        base = trial;
+        ev = next;
+      }
+    }
+  }
+  if (base !== (leader?.placements ?? initial)) record("stack", base, ev);
+
+  stageLimit = maxProxyEvals;
+  if (
+    ev.crossings >= 2 &&
+    units.filter((u) => !u.fixed).length >= 3 &&
+    !budgetExhausted()
+  ) {
+    const edges: HotEdge[] = [];
+    evaluatePoses(base, edges);
+    const held = clearStacks(base);
+    // Couple held endpoints only for the rebuild. The row and macro passes
+    // retain their independent slots, and LNS can translate the whole stack.
+    const neighborhoodUnits = [...units];
+    for (const stack of held) {
+      const a = neighborhoodUnits.find((u) => u.members.includes(stack.a.id))!;
+      const b = neighborhoodUnits.find((u) => u.members.includes(stack.b.id))!;
+      if (a === b) continue;
+      neighborhoodUnits.splice(neighborhoodUnits.indexOf(b), 1);
+      neighborhoodUnits[neighborhoodUnits.indexOf(a)] = {
+        id: a.id,
+        members: [...a.members, ...b.members],
+        fixed: a.fixed || b.fixed,
+        hasGroupOrSymmetry: a.hasGroupOrSymmetry || b.hasGroupOrSymmetry,
+      };
+    }
+    const result = runLnsRuinRecreate(base, ev, {
+      units: neighborhoodUnits,
+      edges,
+      box: groupBox,
+      orientations,
+      snap,
+      conflict: (p, m) => movedHasConflict(p, m, 0),
+      evaluate: evaluatePoses,
+      preservesStacks: (p) => {
+        const clear = clearStacks(p);
+        return held.every((s) => clear.includes(s));
+      },
+      grid,
+      exhausted: budgetExhausted,
+      guided: (u, trial) => {
+        const shifts = stackSteps(u, trial);
+        const deltas: Point[] = [];
+        for (const net of activeNets) {
+          const ref = net.find((p) => u.members.includes(p.instanceId));
+          if (!ref) continue;
+          const p = trial.get(ref.instanceId)!;
+          const a = transformPoint(ref.at, p.position, p);
+          for (const other of net) {
+            const q = trial.get(other.instanceId);
+            if (!q || u.members.includes(other.instanceId)) continue;
+            const b = transformPoint(other.at, q.position, q);
+            const exit = pinExit(other.pin, q);
+            deltas.push({
+              x: b.x - a.x + 4 * grid * exit.x,
+              y: b.y - a.y + 4 * grid * exit.y,
+            });
+          }
+        }
+        if (deltas.length)
+          shifts.push({
+            x: deltas.reduce((s, d) => s + d.x, 0) / deltas.length,
+            y: deltas.reduce((s, d) => s + d.y, 0) / deltas.length,
+          });
+        return [...shifts, ...deltas.slice(0, 2)];
+      },
+    });
+    if (result.poses !== base) record("lns", result.poses, result.eval);
+  }
+
   if (!collected.length) {
     return {
       placements: initial,
@@ -1557,6 +1806,12 @@ export function aprDetailPlace(
   }
 
   collected.sort((a, b) => a.score - b.score);
+  // Routing screens only two candidates on large schematics. Reserve a
+  // place for the best conventional pass alongside its stack/LNS refinement.
+  if (leader && collected.indexOf(leader) > 1) {
+    collected.splice(collected.indexOf(leader), 1);
+    collected.splice(1, 0, leader);
+  }
   const topCandidates = collected.slice(0, 4);
   const winner = topCandidates[0]!;
 

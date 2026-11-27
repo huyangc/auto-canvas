@@ -33,7 +33,7 @@ import { compareIds } from "./recognize.js";
 import { compareCompleteness, compareRuns, type LayoutRun } from "./refine.js";
 import { calibratedScore, routedGuards } from "./routed-search-score.js";
 import { auditRouting, crossingsByNet } from "./routing-audit.js";
-import { stackHolds, stackPairs, type Stack } from "./stack-snap.js";
+import { stackClear, stackPairs, type Stack } from "./stack-snap.js";
 import { symmetryTopology } from "./symmetry.js";
 import type { Placement } from "./types.js";
 
@@ -69,6 +69,19 @@ const turned = (pose: Placement, rotation: number): Placement => ({
   rotation: (((pose.rotation ?? 0) + rotation) % 360) as Placement["rotation"],
 });
 
+function stackBounds(document: SchematicDocument, resolver: SymbolResolver) {
+  const drawing = {
+    ...document,
+    instances: document.instances.filter((i) => !isMarker(i)),
+  };
+  return new Map(
+    visibleInstanceBounds(drawing, resolver).map(({ id, bounds }) => [
+      id,
+      bounds,
+    ]),
+  );
+}
+
 function trialGeometry(
   document: SchematicDocument,
   resolver: SymbolResolver,
@@ -103,23 +116,29 @@ function trialGeometry(
       ]),
     );
   const original = keyOf(poses);
-  const proposalFor = (changes: ReadonlyMap<string, Placement>) => {
+  const proposalFor = (
+    changes: ReadonlyMap<string, Placement>,
+    blockers?: Set<string>,
+  ) => {
     const moved = visibleInstanceBounds(
       withPlacements(members(new Set(changes.keys())), changes),
       resolver,
     );
     const others = bounds.filter(({ id }) => !changes.has(id));
-    for (const [index, { bounds: a }] of moved.entries())
-      if (
-        [...others, ...moved.slice(index + 1)].some(
-          ({ bounds: b }) =>
-            a.x < b.x + b.width &&
-            b.x < a.x + a.width &&
-            a.y < b.y + b.height &&
-            b.y < a.y + a.height,
-        )
-      )
-        return undefined;
+    for (const [index, { bounds: a }] of moved.entries()) {
+      for (const { id, bounds: b } of [...others, ...moved.slice(index + 1)]) {
+        if (
+          a.x < b.x + b.width &&
+          b.x < a.x + a.width &&
+          a.y < b.y + b.height &&
+          b.y < a.y + a.height
+        ) {
+          if (!blockers) return undefined;
+          blockers.add(id);
+        }
+      }
+    }
+    if (blockers?.size) return undefined;
     const trial = new Map(poses);
     for (const [id, pose] of changes) trial.set(id, pose);
     if (!locked.size) {
@@ -138,6 +157,8 @@ function trialGeometry(
     translateUnit,
     withMarkers,
     proposalFor,
+    stackBounds: (trial: ReadonlyMap<string, Placement>) =>
+      stackBounds(withPlacements(document, trial), resolver),
   };
 }
 
@@ -159,10 +180,15 @@ function finishGuards(
   locked: ReadonlySet<string>,
 ) {
   const poses = posesOf(document);
-  const held = stacks.filter((s) => stackHolds(s, poses));
+  const bounds = stackBounds(document, resolver);
+  const held = stacks.filter((s) => stackClear(s, poses, bounds));
   const limits = quality(document, resolver);
   const beforeSym = netlistSymmetry(document, resolver).violations;
-  return (finished: SchematicDocument, now: ReadonlyMap<string, Placement>) =>
+  return (
+    finished: SchematicDocument,
+    now: ReadonlyMap<string, Placement>,
+    finalBounds = stackBounds(finished, resolver),
+  ) =>
     [...locked].some((id) => {
       const before = poses.get(id);
       const after = now.get(id);
@@ -177,7 +203,7 @@ function finishGuards(
     }) ||
     units.some((ids) => ids.length > 1 && ids.some((id) => !now.get(id))) ||
     splitsRigidUnit(document, finished, units) ||
-    held.some((s) => !stackHolds(s, now)) ||
+    held.some((s) => !stackClear(s, now, finalBounds)) ||
     Object.entries(quality(finished, resolver)).some(
       ([key, count]) => count > (limits[key] ?? 0),
     ) ||
@@ -391,6 +417,9 @@ function* stackTrials(
   stack: Stack,
   units: ReturnType<typeof relocationUnits>,
   geometry: ReturnType<typeof trialGeometry>,
+  allowedPose: (id: string, pose: Placement) => boolean,
+  freeBlockers: ReadonlySet<string>,
+  fallback: boolean,
 ) {
   const a = geometry.poses.get(stack.a.id)!;
   const b = geometry.poses.get(stack.b.id)!;
@@ -422,8 +451,13 @@ function* stackTrials(
     const exit = pinExit(anchor.pin, seat);
     const rotations =
       unit.length === 1 && !mover.transistor ? [0, 90, 180, 270] : [0];
-    for (const rotation of rotations) {
-      const pose = rotation ? turned(old, rotation) : old;
+    const poses = rotations.map((rotation) =>
+      rotation ? turned(old, rotation) : old,
+    );
+    if (fallback && unit.length === 1 && mover.transistor)
+      poses.push({ ...old, ...reflectOrientation(old, "left-right") });
+    for (const pose of poses) {
+      if (pose !== old && !allowedPose(mover.id, pose)) continue;
       const facing = pinExit(mover.pin, pose);
       if (facing.x !== -exit.x || facing.y !== -exit.y) continue;
       const offset = delta(
@@ -432,7 +466,7 @@ function* stackTrials(
       );
       const along = dot(offset, exit);
       const across = delta(offset, { x: along * exit.x, y: along * exit.y });
-      const gaps = along < 0 ? [0] : [1, 2, 3];
+      const gaps = along < 0 ? (fallback ? [0, 1, 2, 3] : [0]) : [1, 2, 3];
       for (const gap of gaps) {
         const shift = gap ? along + gap * geometry.grid : 0;
         const step = geometry.snap({
@@ -441,10 +475,40 @@ function* stackTrials(
         });
         const changes = geometry.translateUnit(ids, step);
         changes.set(mover.id, translate(pose, step));
-        const proposal = geometry.proposalFor(changes);
-        if (!proposal || !stackHolds(stack, proposal.trial)) continue;
-        yield proposal;
-        break;
+        const blockers = new Set<string>();
+        let proposal = geometry.proposalFor(changes, blockers);
+        if (fallback && !proposal && gap === gaps[0] && blockers.size === 1) {
+          const [id] = blockers;
+          if (
+            id &&
+            id !== anchor.id &&
+            !changes.has(id) &&
+            freeBlockers.has(id)
+          ) {
+            const carried = geometry.withMarkers([id]);
+            if (carried && carried.every((other) => !changes.has(other)))
+              for (const n of [1, -1, 2, -2]) {
+                const step = {
+                  x: exit.y * n * geometry.grid,
+                  y: exit.x * n * geometry.grid,
+                };
+                proposal = geometry.proposalFor(
+                  new Map([
+                    ...changes,
+                    ...geometry.translateUnit(carried, step),
+                  ]),
+                );
+                if (proposal) break;
+              }
+          }
+        }
+        if (!proposal) continue;
+        const bounds = geometry.stackBounds(proposal.trial);
+        if (!stackClear(stack, proposal.trial, bounds)) continue;
+        yield { ...proposal, bounds };
+        // If the cooperative move fails the routed guards, the mover can
+        // still try the other gaps without displacing the blocker.
+        if (!blockers.size) break;
       }
     }
   }
@@ -463,7 +527,9 @@ export function repairBrokenStacks(
   if (!Number.isFinite(calibratedScore(initial, resolver))) return initial;
   const stacks = stacksOf(initial.final, resolver);
   const initialPoses = posesOf(initial.final);
-  let broken = stacks.filter((s) => !stackHolds(s, initialPoses));
+  if (!stacks.length) return initial;
+  const bounds = stackBounds(initial.final, resolver);
+  let broken = stacks.filter((s) => !stackClear(s, initialPoses, bounds));
   if (!broken.length) return initial;
 
   const locked = lockedInstances(initial.final, fixed);
@@ -478,43 +544,78 @@ export function repairBrokenStacks(
     const regresses = finishGuards(document, resolver, stacks, units, locked);
     const before = auditRouting(document, resolver);
     const beforeLabels = readabilityCounts(document, resolver);
-    trials: for (const stack of broken) {
-      for (const { trial, key } of stackTrials(stack, units, geometry)) {
-        if (budget <= 0 || stopped()) return current;
-        if (tried.has(key)) continue;
-        tried.add(key);
-        budget--;
-        const candidate = replan(trial);
-        const finished = candidate.final;
-        if (
-          !finished ||
-          candidate === declined ||
-          finished === document ||
-          compareCompleteness(candidate, current, resolver) > 0
-        )
-          continue;
-        const after = auditRouting(finished, resolver);
-        if (
-          after.crossings > before.crossings ||
-          after.bends > before.bends ||
-          after.wireLength > before.wireLength + 60
-        )
-          continue;
-        const now = posesOf(finished);
-        const remaining = stacks.filter((s) => !stackHolds(s, now));
-        if (remaining.length >= broken.length || regresses(finished, now))
-          continue;
-        const labels = readabilityCounts(finished, resolver);
-        if (
-          labels.labelOverlaps > beforeLabels.labelOverlaps ||
-          labels.labelClearance > beforeLabels.labelClearance
-        )
-          continue;
-        current = { ...candidate, choices: initial.choices };
-        broken = remaining;
-        break trials;
+    const devices = document.instances.filter((i) => !isMarker(i));
+    const byId = new Map(devices.map((i) => [i.id, i]));
+    const roles = classifyNets(document, resolver);
+    const rightFacing = rightFacingBlocks(devices, resolver, roles, locked);
+    const symmetry = new Set(
+      [...netlistMirrorPairs(readabilityNetlist(document, resolver))].flatMap(
+        (c) => [...c.pairs.flat(), ...c.axisDevices],
+      ),
+    );
+    const freeBlockers = new Set(
+      units.flatMap((ids) =>
+        ids.length === 1 && byId.has(ids[0]!) && !symmetry.has(ids[0]!)
+          ? ids
+          : [],
+      ),
+    );
+    const held = stacks.filter((s) => !broken.includes(s));
+    const allowedPose = (id: string, p: Placement) =>
+      keepsOrder(byId.get(id)!, resolver, p) &&
+      (!rightFacing.has(id) || !outputFacesLeft(byId.get(id)!, p, resolver));
+    trials: for (const fallback of [false, true])
+      for (const stack of broken) {
+        for (const { trial, key, bounds } of stackTrials(
+          stack,
+          units,
+          geometry,
+          allowedPose,
+          freeBlockers,
+          fallback,
+        )) {
+          if (budget <= 0 || stopped()) return current;
+          if (tried.has(key)) continue;
+          if (held.some((s) => !stackClear(s, trial, bounds))) continue;
+          tried.add(key);
+          budget--;
+          const candidate = replan(trial);
+          const finished = candidate.final;
+          if (
+            !finished ||
+            candidate === declined ||
+            finished === document ||
+            compareCompleteness(candidate, current, resolver) > 0
+          )
+            continue;
+          const after = auditRouting(finished, resolver);
+          if (
+            after.crossings > before.crossings ||
+            after.bends > before.bends ||
+            after.wireLength > before.wireLength + 60
+          )
+            continue;
+          const now = posesOf(finished);
+          const finalBounds = stackBounds(finished, resolver);
+          const remaining = stacks.filter(
+            (s) => !stackClear(s, now, finalBounds),
+          );
+          if (
+            remaining.length >= broken.length ||
+            regresses(finished, now, finalBounds)
+          )
+            continue;
+          const labels = readabilityCounts(finished, resolver);
+          if (
+            labels.labelOverlaps > beforeLabels.labelOverlaps ||
+            labels.labelClearance > beforeLabels.labelClearance
+          )
+            continue;
+          current = { ...candidate, choices: initial.choices };
+          broken = remaining;
+          break trials;
+        }
       }
-    }
     if (current.final === document) break;
   }
   return current;

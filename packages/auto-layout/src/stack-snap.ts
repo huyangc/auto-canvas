@@ -187,6 +187,47 @@ const ORIENTATIONS = ([0, 90, 180, 270] as const).flatMap((rotation) =>
   (["none", "horizontal"] as const).map((mirror) => ({ rotation, mirror })),
 );
 
+// Device bodies crossing the open segment between the two stack pins.
+const between = (
+  stack: Stack,
+  placements: ReadonlyMap<string, Placement>,
+  bounds: ReadonlyMap<string, DerivedRect>,
+) => {
+  const a = endPoint(stack.a, placements.get(stack.a.id)!).point;
+  const b = endPoint(stack.b, placements.get(stack.b.id)!).point;
+  const x0 = Math.min(a.x, b.x),
+    x1 = Math.max(a.x, b.x),
+    y0 = Math.min(a.y, b.y),
+    y1 = Math.max(a.y, b.y);
+  return [...bounds]
+    .filter(
+      ([id, r]) =>
+        id !== stack.a.id &&
+        id !== stack.b.id &&
+        (x1 - x0 < 1
+          ? r.x < x0 - 0.5 &&
+            r.x + r.width > x0 + 0.5 &&
+            r.y < y1 - 0.5 &&
+            r.y + r.height > y0 + 0.5
+          : r.y < y0 - 0.5 &&
+            r.y + r.height > y0 + 0.5 &&
+            r.x < x1 - 0.5 &&
+            r.x + r.width > x0 + 0.5),
+    )
+    .map(([id]) => id);
+};
+
+export function stackClear(
+  stack: Stack,
+  placements: ReadonlyMap<string, Placement>,
+  bounds: ReadonlyMap<string, DerivedRect>,
+) {
+  return (
+    stackHolds(stack, placements) &&
+    between(stack, placements, bounds).length === 0
+  );
+}
+
 /**
  * R166: align the broken stacks of one strategy draft, sideways only. Returns
  * the Nets of the stacks it aligned; `targets` changes only by whole accepted
@@ -218,35 +259,6 @@ export function alignStacks(
     q.x + q.width > r.x + 0.5 &&
     q.y < r.y + r.height - 0.5 &&
     q.y + q.height > r.y + 0.5;
-  // Device bodies crossing the open segment between the two stack pins.
-  const between = (
-    stack: Stack,
-    placements: ReadonlyMap<string, Placement>,
-    bounds: ReadonlyMap<string, DerivedRect>,
-  ) => {
-    const a = endPoint(stack.a, placements.get(stack.a.id)!).point;
-    const b = endPoint(stack.b, placements.get(stack.b.id)!).point;
-    const x0 = Math.min(a.x, b.x),
-      x1 = Math.max(a.x, b.x),
-      y0 = Math.min(a.y, b.y),
-      y1 = Math.max(a.y, b.y);
-    return [...bounds]
-      .filter(
-        ([id, r]) =>
-          id !== stack.a.id &&
-          id !== stack.b.id &&
-          (x1 - x0 < 1
-            ? r.x < x0 - 0.5 &&
-              r.x + r.width > x0 + 0.5 &&
-              r.y < y1 - 0.5 &&
-              r.y + r.height > y0 + 0.5
-            : r.y < y0 - 0.5 &&
-              r.y + r.height > y0 + 0.5 &&
-              r.x < x1 - 0.5 &&
-              r.x + r.width > x0 + 0.5),
-      )
-      .map(([id]) => id);
-  };
   const overlapping = (
     id: string,
     bounds: ReadonlyMap<string, DerivedRect>,
@@ -259,10 +271,7 @@ export function alignStacks(
       : [];
   };
   let bounds = boundsOf(targets);
-  const held = stacks.filter(
-    (stack) =>
-      stackHolds(stack, targets) && !between(stack, targets, bounds).length,
-  );
+  const held = stacks.filter((stack) => stackClear(stack, targets, bounds));
   const locked = new Set([...frozen, ...pairMembers(devices, roles)]);
   for (const stack of held) locked.add(stack.a.id).add(stack.b.id);
   const aligned: string[] = [];
@@ -272,8 +281,7 @@ export function alignStacks(
     .sort((x, y) => y.transistors - x.transistors);
   for (const stack of broken) {
     // An earlier move can complete this stack; it then stays free.
-    if (stackHolds(stack, targets) && !between(stack, targets, bounds).length)
-      continue;
+    if (stackClear(stack, targets, bounds)) continue;
     // A two-pin part moves before a transistor; then the lower id moves.
     const movers = (
       [
@@ -351,11 +359,7 @@ export function alignStacks(
           blockers.length ||
           geometryProblem(withPlacements(deviceDocument, trial), resolver) ||
           // Never break or obstruct a stack that already holds.
-          held.some(
-            (other) =>
-              !stackHolds(other, trial) ||
-              between(other, trial, trialBounds).length,
-          )
+          held.some((other) => !stackClear(other, trial, trialBounds))
         )
           return false;
         for (const [id, placement] of trial) targets.set(id, placement);
