@@ -234,7 +234,7 @@ it("counts a stranded unmarked device and still reports a floating named port", 
 
 it("routes unnamed ports as one tree and excludes rail nets from signal clustering", () => {
   const source = threeHosts();
-  const named = plan(source, ["A", "B", "C"]);
+  const named = structuredClone(plan(source, ["A", "B", "C"]));
   delete named.netlist;
   named.connectivityEvidence = [];
   expect(missingConnections(named, resolver)).toBeGreaterThan(0);

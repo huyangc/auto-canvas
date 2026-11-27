@@ -1,7 +1,6 @@
 const ID_PREFIX_PATTERN = /^[a-z][a-z0-9-]*$/;
-const FNV_OFFSET_BASIS_64 = 0xcbf29ce484222325n;
-const FNV_PRIME_64 = 0x100000001b3n;
-const UINT64_MASK = 0xffffffffffffffffn;
+const NON_ASCII = /[^\x00-\x7f]/;
+const encoder = new TextEncoder();
 
 function assertPrefix(prefix: string): void {
   if (!ID_PREFIX_PATTERN.test(prefix)) {
@@ -10,12 +9,21 @@ function assertPrefix(prefix: string): void {
 }
 
 function fnv1a64(value: string): string {
-  let hash = FNV_OFFSET_BASIS_64;
-  for (const byte of new TextEncoder().encode(value)) {
-    hash ^= BigInt(byte);
-    hash = (hash * FNV_PRIME_64) & UINT64_MASK;
+  let lo = 0x84222325;
+  let hi = 0xcbf29ce4;
+  // The prime is 2^40 + 435. The low-word product fits exactly in a
+  // Number, including the carry into the high word.
+  const bytes = NON_ASCII.test(value) ? encoder.encode(value) : undefined;
+  const length = bytes?.length ?? value.length;
+  for (let index = 0; index < length; index++) {
+    lo = (lo ^ (bytes ? bytes[index]! : value.charCodeAt(index))) >>> 0;
+    const product = lo * 435;
+    hi =
+      (Math.imul(hi, 435) + (lo << 8) + Math.floor(product / 0x100000000)) >>>
+      0;
+    lo = product >>> 0;
   }
-  return hash.toString(16).padStart(16, "0");
+  return hi.toString(16).padStart(8, "0") + lo.toString(16).padStart(8, "0");
 }
 
 export function deriveStableId(

@@ -16,7 +16,10 @@ import {
   type SchematicDocument,
 } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { executeTransaction, type SchematicEdit } from "./transaction.js";
+import {
+  previewPlannerTransaction,
+  type SchematicEdit,
+} from "./transaction.js";
 import {
   defaultBoundMosBody,
   proposeWireIntent,
@@ -237,6 +240,7 @@ function keepClear(
         points,
         nets,
         path.route.members?.length ?? 1,
+        context,
         netScope,
       ) ?? intent
     );
@@ -274,6 +278,7 @@ function keepClear(
         clear.points,
         nets,
         path.route.members?.length ?? 1,
+        context,
         netScope,
       )) ??
     cleared
@@ -298,10 +303,10 @@ function tapOwnWire(
   points: readonly Point[],
   nets: { from: readonly string[]; to: readonly string[] },
   signalWidth: number,
+  context: ReturnType<typeof deriveNetConnectivityContext>,
   netScope?: "base",
 ): WireIntent | null {
   if (points.length < 3) return null;
-  const context = deriveNetConnectivityContext(document, resolver);
   const wiresOf = (logicalIds: readonly string[]) => {
     const own = new Set(logicalIds);
     return document.routes.flatMap((route) => {
@@ -487,7 +492,9 @@ export function planWireBatch(
     return proposeWireIntent(document, resolver, intent);
   }
   const draft = createContactPlanningDraft(document, resolver);
-  const working = draft.document;
+  // The first gesture reads the unchanged source, including its immutable
+  // geometry caches. Switch to the evolving private draft after it applies.
+  let working = document;
   const edits = draft.edits;
   const descendants = new Map(
     document.routes.map((route) => [route.id, new Set([route.id])]),
@@ -510,7 +517,7 @@ export function planWireBatch(
     // Ask the ordinary finalizer whether the tap is unambiguous, but never
     // copy its rewritten IDs into the replay draft. Foreign crossings remain
     // subject to the same selector contract.
-    const preview = executeTransaction(
+    const preview = previewPlannerTransaction(
       document,
       {
         transactionId: "wire-batch-selector",
@@ -695,6 +702,7 @@ export function planWireBatch(
       return `Wire ${index + 1}: batch requires ${edits.length + materialized.length} edits, exceeding the ${limit}-edit transaction limit`;
     try {
       for (const edit of materialized) draft.apply(edit);
+      working = draft.document;
     } catch (error) {
       return `Wire ${index + 1}: ${error instanceof Error ? error.message : String(error)}`;
     }

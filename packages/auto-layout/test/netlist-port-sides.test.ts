@@ -84,7 +84,12 @@ function reversed(block?: "inverter", extraParts = 0) {
   };
   const plan = route(seats);
   if (!plan) throw Error("expected connected resistor fixture");
-  return { d, plan, route, seats };
+  return {
+    d,
+    plan: { ...plan, final: structuredClone(plan.final) },
+    route,
+    seats,
+  };
 }
 
 it("carries a routed netlist to the input-left orientation in one replay", () => {
