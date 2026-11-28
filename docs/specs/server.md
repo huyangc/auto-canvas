@@ -314,10 +314,11 @@ the wait is a best effort: unfinished writes, or a tab that closes or crashes,
 lose what the standard editor would lose, and a copy kept only for the tab
 returns only in that tab. Other users' data stays in the browser profile,
 unshown and unencrypted; signing out does not remove it. In the editor's top
-bar, the notebook build renders the signed-in user's menu with their display
-name, **My Cloud Projects**, **User Analytics** (for administrators),
-**Auto-save to Cloud**, and a link back to silicon-notebook (`/` or the
-originating group hash `/#groups&group=<id>`).
+bar, the notebook build renders a top-left Silicon Notebook icon link back to
+silicon-notebook (`/` or the originating group/notebook route), and the
+signed-in user's menu with their display name, **My Cloud Projects**, **User
+Analytics** (for administrators), **Auto-save to Cloud**, and the same return
+link.
 
 ### Notebook group-shared libraries
 

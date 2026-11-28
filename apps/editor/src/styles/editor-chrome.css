@@ -1951,6 +1951,47 @@
   }
 }
 
+.notebook-home-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.notebook-home-link {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  text-decoration: none;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.notebook-home-link:hover {
+  background: var(--icm-surface-hover);
+  border-color: var(--icm-border-strong);
+}
+
+.notebook-home-icon {
+  display: block;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+}
+
+.notebook-brand-sep {
+  color: var(--icm-border-hover);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1;
+  user-select: none;
+  margin-inline: -2px;
+}
+
 .app-chrome-main .app-brand > .app-project-name {
   display: inline-flex;
   flex: 0 1000 auto;

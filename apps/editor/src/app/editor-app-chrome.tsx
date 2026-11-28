@@ -138,7 +138,12 @@ function ProjectNameLabel({
     <>
       <span className="app-project-name-text">{shown}</span>
       {dirty ? (
-        <span className="project-unsaved-indicator" aria-hidden="true">
+        <span
+          className="project-unsaved-indicator"
+          data-testid="project-unsaved-indicator"
+          aria-label="Unsaved changes"
+          title="Unsaved changes"
+        >
           ●
         </span>
       ) : null}
@@ -275,6 +280,69 @@ export function EditorAppChrome({
     <header className="app-chrome">
       <div className="app-chrome-main">
         <div className="app-brand">
+          {notebookUser ? (
+            <div className="notebook-home-group">
+              <a
+                className="notebook-home-link"
+                href={notebookUser.backHref ?? "/"}
+                data-testid="notebook-home-link"
+                aria-label={notebookUser.backLabel ?? "返回 Silicon Notebook"}
+                title={notebookUser.backLabel ?? "返回 Silicon Notebook"}
+              >
+                <svg
+                  className="notebook-home-icon"
+                  viewBox="0 0 64 64"
+                  width="22"
+                  height="22"
+                  aria-hidden="true"
+                >
+                  <rect width="64" height="64" rx="14" fill="#1f5eff" />
+                  <rect
+                    x="17"
+                    y="10"
+                    width="37"
+                    height="44"
+                    rx="5"
+                    fill="#fff"
+                  />
+                  <path d="M25 10v44" stroke="#d8dee6" strokeWidth="2" />
+                  <path
+                    d="M11 20h11M11 32h11M11 44h11"
+                    fill="none"
+                    stroke="#17202a"
+                    strokeLinecap="round"
+                    strokeWidth="4"
+                  />
+                  <path
+                    d="M29 26h4M29 32h4M29 38h4M47 26h4M47 32h4M47 38h4"
+                    fill="none"
+                    stroke="#17202a"
+                    strokeLinecap="round"
+                    strokeWidth="3"
+                  />
+                  <rect
+                    x="33"
+                    y="22"
+                    width="14"
+                    height="20"
+                    rx="2"
+                    fill="#17202a"
+                  />
+                  <rect
+                    x="37"
+                    y="27"
+                    width="6"
+                    height="10"
+                    rx="1"
+                    fill="#fff"
+                  />
+                </svg>
+              </a>
+              <span className="notebook-brand-sep" aria-hidden="true">
+                /
+              </span>
+            </div>
+          ) : null}
           <div
             className="editor-brand"
             aria-label="Auto Canvas"
@@ -382,7 +450,7 @@ export function EditorAppChrome({
           <AutoLayoutButton {...autoLayout} run={autoLayoutRun} />
           {/* File holds Project Info and the file commands; project tabs
               select projects. */}
-          <ProjectMenu label="File" name={projectName} dirty={hasUnsavedWork}>
+          <ProjectMenu label="File" name={projectName}>
             <FileCommandMenu {...fileCommands} embedded />
           </ProjectMenu>
           {agentAction ? (

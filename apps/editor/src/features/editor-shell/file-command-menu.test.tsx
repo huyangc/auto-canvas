@@ -148,7 +148,7 @@ describe("FileCommandMenu project tab actions", () => {
     root = createRoot(host);
     await act(async () =>
       root!.render(
-        <ProjectMenu label="File" name="Amp" dirty={false}>
+        <ProjectMenu label="File" name="Amp">
           <FileCommandMenu {...baseProps()} projectTabs={actions} embedded />
         </ProjectMenu>,
       ),

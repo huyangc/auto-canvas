@@ -6,7 +6,6 @@ export interface ProjectMenuProps {
   /** The menu's name in the header; the project's name is its tooltip. */
   label?: string;
   name: string;
-  dirty: boolean;
   /** The file commands: the header's File group. */
   children?: ReactNode;
   onOpen?(): void;
@@ -19,7 +18,6 @@ export interface ProjectMenuProps {
 export function ProjectMenu({
   label,
   name,
-  dirty,
   children,
   onOpen,
 }: ProjectMenuProps) {
@@ -43,16 +41,6 @@ export function ProjectMenu({
     >
       <summary title={name} data-testid="project-menu-toggle">
         <span className="project-menu-title">{label ?? name}</span>
-        {dirty ? (
-          <span
-            className="project-unsaved-indicator"
-            data-testid="project-unsaved-indicator"
-            aria-label="Unsaved changes"
-            title="Unsaved changes"
-          >
-            ●
-          </span>
-        ) : null}
       </summary>
       <div
         className="command-popover project-menu-popover"
