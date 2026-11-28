@@ -141,7 +141,10 @@ for (const [title, stored] of [
     await page.goto("/canvas/editor");
     const signedOut = page.getByTestId("notebook-signed-out");
     await expect(signedOut).toBeVisible();
-    await expect(signedOut.getByRole("link")).toHaveAttribute("href", "/");
+    await expect(signedOut.getByRole("link")).toHaveAttribute(
+      "href",
+      "/?next=%2Fcanvas%2Feditor",
+    );
     await page.waitForLoadState("networkidle");
     const end = await recorder.mark("control");
 

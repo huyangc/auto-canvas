@@ -16,6 +16,7 @@ import {
 import type { AppProps } from "../app/App";
 import type { createWebEditorServices } from "../services/web-editor-services";
 import "../styles.css";
+import "../notebook/gate-screens.css";
 import { configureWebServiceWorker } from "./web-service-worker";
 
 import { isAnalyticsPath } from "../features/analytics/analytics-route";
