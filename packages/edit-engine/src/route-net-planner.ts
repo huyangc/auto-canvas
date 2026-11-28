@@ -85,6 +85,7 @@ export function planRouteNet(
     components?: "visible" | "physical";
     partial?: boolean;
     crossingCost?: number;
+    pathSearch?: "pattern" | "hanan-fallback";
     /** Reserve identities removed by a caller before this routing preview. */
     reservedIds?: ReadonlySet<string>;
   } = {},
@@ -335,6 +336,7 @@ function planRouteNetOnce(
   // Net's wire would read as a connection the netlist does not have.
   const clearance = createRouteClearance(document, resolver, context, {
     netScope: options.netScope ?? "logical",
+    pathSearch: options.pathSearch ?? "pattern",
     crossingCost: options.crossingCost ?? 0,
     logicalIds: new Set(
       components.flatMap((component) =>
@@ -460,6 +462,8 @@ function planRouteNetOnce(
       id,
       options.partial,
       unjoined,
+      options.pathSearch === "hanan-fallback" &&
+        (options.crossingCost ?? 0) > 0,
     );
   }
   if (components.length - unjoined.length < 2)
@@ -488,6 +492,7 @@ function planNetTree(
   id: (part: string) => string,
   partial: boolean | undefined,
   unjoined: Unjoined[],
+  compareStraightTrunk: boolean,
 ): WireIntent[] {
   const sorted = [...components].sort((a, b) => a.id.localeCompare(b.id, "en"));
   const nodes = sorted.flatMap((component) =>
@@ -568,6 +573,12 @@ function planNetTree(
         clearance.conflict([p, q], [a.node.endpoint, b.node.endpoint])
       )
         continue;
+      // The implicit straight seed normally bypasses path scoring. In a
+      // crossing-aware rescue, allow a cheaper detour to compete as a seed.
+      if (compareStraightTrunk) {
+        const path = pathTo(a.node, b.node.endpoint);
+        if (typeof path !== "string" && path.waypoints.length) continue;
+      }
       trunk = { a, b };
       trunkLength = length;
     }

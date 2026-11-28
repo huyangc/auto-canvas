@@ -22,6 +22,7 @@ import {
   resolveInstanceSymbol,
   type SymbolResolver,
 } from "@icm/symbols";
+import { findHananPath } from "./hanan-astar.js";
 import { signalEndpointMembers } from "./signal-endpoint.js";
 
 type Rect = { x: number; y: number; width: number; height: number };
@@ -624,6 +625,7 @@ export function createRouteClearance(
     netScope?: "logical" | "base";
     /** Extra path-length cost per proper crossing, zero by default. */
     crossingCost?: number;
+    pathSearch?: "pattern" | "hanan-fallback";
     /** @internal Test aid: run every exact check without bounding-box prefilters. */
     exhaustive?: boolean;
     endpointKeys: ReadonlySet<string>;
@@ -985,6 +987,20 @@ export function createRouteClearance(
     let best: Scored | undefined;
     let reason: string | null = null;
     let reasonCost = Infinity;
+    const along = (
+      connection: EndpointRoutingGeometry,
+      from: Point | undefined,
+      to: Point | undefined,
+    ) => {
+      const outward = connection.outward;
+      if (!outward || !from || !to) return true;
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      return (
+        Math.abs(dx * outward.y - dy * outward.x) <= EPSILON &&
+        dx * outward.x + dy * outward.y > EPSILON
+      );
+    };
     const score = (waypoints: Point[], cornerOrder: CornerOrder) => {
       const points = orthogonalClearancePoints(a, b, waypoints, cornerOrder);
       let signature = "",
@@ -1004,20 +1020,6 @@ export function createRouteClearance(
       // Of two equally short L shapes, the one turning away right at a pin
       // read as a bump (each node of an R-2R ladder came out as two), and
       // which of the two came first depended only on how pin IDs sorted.
-      const along = (
-        connection: EndpointRoutingGeometry,
-        from: Point | undefined,
-        to: Point | undefined,
-      ) => {
-        const outward = connection.outward;
-        if (!outward || !from || !to) return true;
-        const dx = to.x - from.x;
-        const dy = to.y - from.y;
-        return (
-          Math.abs(dx * outward.y - dy * outward.x) <= EPSILON &&
-          dx * outward.x + dy * outward.y > EPSILON
-        );
-      };
       const turnsAway =
         (along(a, points[0], points[1]) ? 0 : 1) +
         (along(b, points.at(-1), points.at(-2)) ? 0 : 1);
@@ -1149,6 +1151,55 @@ export function createRouteClearance(
       }
     }
     const winner = choose() ?? best;
+    if (
+      own.pathSearch === "hanan-fallback" &&
+      grid > 0 &&
+      (!winner || (crossingCost > 0 && crossings!(winner.points) > 0))
+    ) {
+      const fallback = findHananPath(
+        {
+          start,
+          end,
+          grid,
+          escapes: [away(start, startAxis, 1), away(end, endAxis, 1)].filter(
+            (p): p is Point => !!p,
+          ),
+          bodies,
+          routes,
+          sceneRoutes: geometry.routes,
+        },
+        (p, q) => {
+          const first = same(p, start),
+            last = same(q, end);
+          const edge = [p, q];
+          if (
+            conflict(edge, [
+              first ? fromEnd : undefined,
+              last ? toEnd : undefined,
+            ])
+          )
+            return Infinity;
+          return (
+            Math.abs(p.x - q.x) +
+            Math.abs(p.y - q.y) +
+            grid *
+              (Number(first && !along(a, p, q)) +
+                Number(last && !along(b, q, p))) +
+            crossingCost * (crossings?.(edge) ?? 0)
+          );
+        },
+        (point) =>
+          (indexedRoutes?.(paddedBox([point])) ?? routes).some((route) =>
+            route.segments.some(([a, b]) => pointOnSegment(point, a, b)),
+          ),
+        (points) => {
+          score(points.slice(1, -1), "horizontal-first");
+          return choose();
+        },
+      );
+      if (fallback && (!winner || fallback.cost < winner.cost))
+        return result(fallback);
+    }
     if (winner) return result(winner);
     // Textbooks draw a bias line that cannot cross the drawing as a short
     // labelled stub at each end; say so, or the Agent is left stuck.
