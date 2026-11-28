@@ -80,7 +80,7 @@
   border-radius: 999px;
   border: 1px solid var(--icm-border);
   background: var(--icm-surface-muted);
-  color: var(--icm-text-muted);
+  color: var(--icm-text);
   font-size: var(--icm-font-xs);
   font-weight: 500;
   white-space: nowrap;
@@ -137,7 +137,8 @@
     transform 120ms ease;
 }
 
-.notebook-gate-action:hover {
+.notebook-gate-action:hover,
+button.notebook-gate-action:hover:not(:disabled) {
   background: #165fa8;
   border-color: transparent;
   color: #ffffff;
