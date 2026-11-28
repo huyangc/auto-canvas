@@ -347,7 +347,8 @@ function createEditorShortcutHandler({
             "Backspace",
           ].includes(event.key)) ||
         (event.target.closest(".project-tabs") &&
-          ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)))
+          ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) ||
+        (event.target.closest(".notebook-home-link") && event.key === "Enter"))
     )
       return;
     if (componentEditor) return;
