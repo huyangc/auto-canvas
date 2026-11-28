@@ -194,9 +194,24 @@ Routes in this mode:
   header a browser never attaches by itself, and behind notebook's proxy the
   Host is the upstream address.
 - `GET /api/auth/me` returns the notebook user (`provider: "notebook"`,
-  `email: null`, `role` `admin` or `user`); `GET /api/auth/providers` is as in
-  standalone mode; `POST /api/auth/profile` and `POST /api/auth/logout` are
-  409 `managed-by-notebook`.
+  `email: null`, effective `role` `admin` or `user`, plus `notebookAdmin` and
+  `canvasAdmin` flags); `GET /api/auth/providers` is as in standalone mode;
+  `POST /api/auth/profile` and `POST /api/auth/logout` are 409
+  `managed-by-notebook`.
+- Canvas-independent administrators (migration `009-canvas-admins.sql`):
+  Silicon Notebook administrators (`notebookAdmin: true`) are always Canvas
+  administrators and cannot be revoked or modified in Canvas. Only Silicon
+  Notebook administrators may grant or revoke Canvas-only administrator rights
+  (`users.canvas_admin`) for other Silicon Notebook users via
+  `PATCH /api/admin/canvas-admins/:id` (`{canvasAdmin: boolean}`, returning 409
+  `notebook-admin-immutable` for Notebook admins and 409 `own-account` for the
+  caller) or pre-grant by Silicon Notebook username via
+  `POST /api/admin/canvas-admins` (`{username}`, resolved through
+  silicon-notebook's `GET /api/users/resolve`). Canvas-only administrators gain
+  live Canvas admin permissions immediately (access to `/canvas/analytics` in
+  read-only mode for admin management, component moderation, and direct
+  publishing/reviewing in public and joined group libraries) without gaining
+  any Silicon Notebook administrator privilege.
 - The Agent relay is off: no relay is constructed, `/api/agent` and
   `/api/agent/*` are 404 for every method, and WebSocket upgrades are answered
   `HTTP/1.1 404 Not Found`. `AUTO_CANVAS_AGENT_IDLE_MS` is not read.
@@ -350,9 +365,12 @@ circuit projects (`group_projects`) and shared user components
   submissions.
 - In notebook mode, the header account menu lists **我的电路库**, **群组电路库**,
   and **公共电路库**, each opening the **电路图库** dialog directly on the
-  matching scope tab (`personal`, `groups`, or `public`). Opening
-  `/canvas/?group=<groupId>` (or `&view=components`) pre-selects that group in
-  the dialog (switching to the public tab automatically if the group is public);
+  matching scope tab (`personal`, `groups`, or `public`). Group, public, and
+  notebook circuit library panels also support multi-file batch upload
+  (`.icproj.json` / `.json`), publishing each file directly as `approved` for
+  admins or `pending` for regular users. Opening `/canvas/?group=<groupId>` (or
+  `&view=components`) pre-selects that group in the dialog (switching to the
+  public tab automatically if the group is public);
   `/canvas/?group=<groupId>&groupProject=<id>` opens that group/public circuit
   as a working copy, and `/canvas/?project=<id>` opens a personal cloud project.
 - The same approval workflow is also exposed per Silicon Notebook under

@@ -122,6 +122,7 @@ export function mountNotebookEditor(overrides: NotebookEntryOverrides = {}) {
               currentUserId={user.id}
               username={user.displayName}
               isAdmin={user.isAdmin === true}
+              canManageCanvasAdmins={user.notebookAdmin === true}
               editorHref={baseUrl}
             />
           </EditorErrorBoundary>,

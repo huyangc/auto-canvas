@@ -140,4 +140,43 @@ describe("createNotebookGroups", () => {
     const result = await client.resolve("tok-outsider", "grp-private", false);
     expect(result).toEqual({ ok: false, status: 404 });
   });
+
+  it("queries scope=mine for Canvas-only admins while granting isAdmin on returned groups", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse([
+        {
+          id: "grp-public-default",
+          name: "公共电路库",
+          kind: "domain",
+          description: "",
+          owner_id: "",
+          my_role: "",
+          is_public: true,
+          member_count: 0,
+        },
+      ]),
+    );
+
+    const client = createNotebookGroups({
+      notebookApi: new URL("http://127.0.0.1:8000"),
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+
+    const result = await client.list("tok-canvas-admin", true, false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requestedUrl = String(
+      (fetchMock.mock.calls[0] as unknown as [URL | string])[0],
+    );
+    expect(requestedUrl).toBe("http://127.0.0.1:8000/api/groups?scope=mine");
+    expect(result).toEqual({
+      ok: true,
+      groups: [
+        expect.objectContaining({
+          id: "grp-public-default",
+          isPublic: true,
+          isAdmin: true,
+        }),
+      ],
+    });
+  });
 });

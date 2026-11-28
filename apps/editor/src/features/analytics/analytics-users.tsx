@@ -3,7 +3,9 @@ import {
   deleteAdminUser,
   fetchAnalyticsUsers,
   fetchAnalyticsUserDetail,
+  grantCanvasAdminByUsername,
   resetAdminUserPassword,
+  setCanvasAdmin,
   updateAdminUser,
   type AnalyticsUser,
   type UsersParams,
@@ -14,6 +16,12 @@ import { Resource } from "./analytics-resource";
 
 const time = (date: string | null) =>
   date ? new Date(date).toLocaleString() : "—";
+const roleLabel = (u: AnalyticsUser, accounts: boolean) => {
+  if (accounts) return u.role;
+  if (u.notebookAdmin) return "Notebook Admin";
+  if (u.canvasAdmin || u.role === "admin") return "Canvas Admin";
+  return "User";
+};
 const status = (u: AnalyticsUser) =>
   [
     u.disabled ? "Disabled" : "Active",
@@ -52,7 +60,7 @@ function UserDetail({
             <h3>{u.displayName}</h3>
             <p>
               {u.username && u.username + " · "}
-              {u.role} {accounts && " · " + status(u)}
+              {roleLabel(u, accounts)} {accounts && " · " + status(u)}
             </p>
             <p>
               First seen {time(u.firstSeenAt)} · Last active{" "}
@@ -166,6 +174,7 @@ function Management({
 const pageSize = 50;
 export function UsersPanel({
   accounts,
+  canManageCanvasAdmins = false,
   currentUserId,
   days,
   revision,
@@ -173,6 +182,7 @@ export function UsersPanel({
   onTemporaryPassword,
 }: {
   accounts: boolean;
+  canManageCanvasAdmins?: boolean;
   currentUserId: string;
   days: number;
   revision: number;
@@ -193,7 +203,8 @@ export function UsersPanel({
   const [detail, setDetail] = useState<string | null>(null);
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState(""),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [grantUsername, setGrantUsername] = useState("");
   const load = useCallback(async () => {
     const data = await fetchAnalyticsUsers({
       ...query,
@@ -233,9 +244,39 @@ export function UsersPanel({
       <h2>Users</h2>
       {!accounts && (
         <p>
-          Accounts and admin roles are inherited from and managed by
-          silicon-notebook.
+          {canManageCanvasAdmins
+            ? "Silicon Notebook administrators are always Canvas administrators and cannot be modified here. You can grant or revoke Canvas-only administrator access for other Silicon Notebook users below."
+            : "Accounts and admin roles are inherited from and managed by silicon-notebook. Only Silicon Notebook administrators can configure Canvas-only administrators."}
         </p>
+      )}
+      {!accounts && canManageCanvasAdmins && (
+        <form
+          className="analytics-tools"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const trimmed = grantUsername.trim();
+            if (!trimmed) return;
+            void run(async () => {
+              await grantCanvasAdminByUsername(trimmed);
+              setGrantUsername("");
+            }, `Granted Canvas admin to ${trimmed}`);
+          }}
+        >
+          <label>
+            Add Canvas admin by Silicon Notebook username
+            <input
+              type="text"
+              placeholder="Silicon Notebook username"
+              value={grantUsername}
+              maxLength={128}
+              disabled={busy}
+              onChange={(e) => setGrantUsername(e.target.value)}
+            />
+          </label>
+          <button type="submit" disabled={busy || !grantUsername.trim()}>
+            Add Canvas admin
+          </button>
+        </form>
       )}
       <div className="analytics-tools">
         <label>
@@ -313,7 +354,7 @@ export function UsersPanel({
                       "Components",
                       "Active days",
                       "Actions",
-                      ...(accounts ? ["Manage"] : []),
+                      ...(accounts || canManageCanvasAdmins ? ["Manage"] : []),
                     ].map((s) => (
                       <th key={s}>{s}</th>
                     ))}
@@ -331,7 +372,9 @@ export function UsersPanel({
                         )}
                       </th>
                       <td>
-                        <span className="analytics-badge">{u.role}</span>
+                        <span className="analytics-badge">
+                          {roleLabel(u, accounts)}
+                        </span>
                       </td>
                       {accounts && (
                         <td>
@@ -361,6 +404,35 @@ export function UsersPanel({
                               if (detail === u.id) setDetail(null);
                             }}
                           />
+                        </td>
+                      )}
+                      {!accounts && canManageCanvasAdmins && (
+                        <td>
+                          {currentUserId === u.id ? (
+                            <strong>Current account</strong>
+                          ) : u.notebookAdmin ? (
+                            <span>Notebook admin (immutable)</span>
+                          ) : (
+                            <fieldset
+                              disabled={busy}
+                              aria-label={"Manage " + u.displayName}
+                            >
+                              <button
+                                onClick={() =>
+                                  void run(
+                                    () => setCanvasAdmin(u.id, !u.canvasAdmin),
+                                    u.canvasAdmin
+                                      ? "Canvas admin revoked"
+                                      : "Canvas admin granted",
+                                  )
+                                }
+                              >
+                                {u.canvasAdmin
+                                  ? "Revoke Canvas admin"
+                                  : "Grant Canvas admin"}
+                              </button>
+                            </fieldset>
+                          )}
                         </td>
                       )}
                     </tr>

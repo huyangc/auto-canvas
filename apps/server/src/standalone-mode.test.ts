@@ -215,6 +215,8 @@ it("keeps the released migrations byte for byte", () => {
       ]),
   );
   expect(digests).toEqual({
+    "009-canvas-admins.sql":
+      "654e91757242bef70bbdb7a6fce13ca9cfcca6ced94b88cbfb08ce9d780c8349",
     "008-user-analytics.sql":
       "91ca3b4466f74f4e017b951674f0a72855487f99d711a65c7242f3c970bcbb13",
     "007-group-shared-libraries.sql":

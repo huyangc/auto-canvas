@@ -9,6 +9,7 @@ import { readAuthConfig, type AuthConfig } from "./auth-config.js";
 import { registerComponents } from "./components.js";
 import type { SessionUser } from "./identity.js";
 import { registerGroupLibraries } from "./group-libraries.js";
+import { registerNotebookAdmins } from "./notebook-admins.js";
 import { createNotebookIdentity } from "./notebook-identity.js";
 import { registerProjects } from "./projects.js";
 
@@ -273,13 +274,22 @@ function registerNotebook(
         ? c.json({ error: "unauthorized" }, 401)
         : c.json({ error: "identity-unavailable" }, 503);
     const { profile } = result;
+    const adminRow = await db.query<{ canvas_admin: boolean }>(
+      "SELECT canvas_admin FROM users WHERE id = $1",
+      [profile.id],
+    );
+    const notebookAdmin = profile.isAdmin;
+    const canvasAdmin = adminRow.rows[0]?.canvas_admin === true;
+    const isAdmin = notebookAdmin || canvasAdmin;
     c.set("sessionUser", {
       id: profile.id,
       displayName: profile.displayName,
       email: null,
       provider: "notebook",
-      role: profile.isAdmin ? "admin" : "user",
-      isAdmin: profile.isAdmin,
+      role: isAdmin ? "admin" : "user",
+      isAdmin,
+      notebookAdmin,
+      canvasAdmin,
     });
     await next();
   });
@@ -301,6 +311,13 @@ function registerNotebook(
     false,
   );
   registerAnalytics(app, db, "notebook", identityOptions.now);
+  registerNotebookAdmins(app, db, {
+    notebookApi: identityOptions.notebookApi,
+    ...(identityOptions.fetch ? { fetch: identityOptions.fetch } : {}),
+    ...(identityOptions.timeoutMs === undefined
+      ? {}
+      : { timeoutMs: identityOptions.timeoutMs }),
+  });
   registerProjects(app, db, (c) => c.get("sessionUser").id, projectLimit);
   registerGroupLibraries(app, db, {
     notebookApi: identityOptions.notebookApi,

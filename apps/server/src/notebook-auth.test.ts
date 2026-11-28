@@ -585,6 +585,8 @@ describe("readiness and identity routes", () => {
         provider: "notebook",
         role: "user",
         isAdmin: false,
+        notebookAdmin: false,
+        canvasAdmin: false,
       },
     });
     expect(
@@ -597,6 +599,8 @@ describe("readiness and identity routes", () => {
         provider: "notebook",
         role: "admin",
         isAdmin: true,
+        notebookAdmin: true,
+        canvasAdmin: false,
       },
     });
     expect(

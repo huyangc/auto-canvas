@@ -54,6 +54,31 @@ function formatTime(value: string): string {
   });
 }
 
+function extractBatchProjectName(
+  fileName: string,
+  projectText: string,
+): string {
+  try {
+    const parsed = JSON.parse(projectText) as unknown;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      typeof (parsed as { name?: unknown }).name === "string"
+    ) {
+      const candidate = (parsed as { name: string }).name.trim();
+      if (candidate) return candidate.slice(0, 120);
+    }
+  } catch {
+    // Fall back to filename stem; server validates the project payload.
+  }
+  const stem = fileName
+    .replace(/\.icproj\.json$/iu, "")
+    .replace(/\.json$/iu, "")
+    .trim();
+  return (stem || "Untitled").slice(0, 120);
+}
+
 export function GroupProjectsPanel({
   currentProject,
   groupVisibility = "all",
@@ -89,6 +114,15 @@ export function GroupProjectsPanel({
   );
   const [submitDesc, setSubmitDesc] = useState("");
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+  const [batchProgress, setBatchProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
+  const [batchReport, setBatchReport] = useState<{
+    summary: string | null;
+    failures: { fileName: string; reason: string }[];
+  } | null>(null);
+  const batchInputRef = useRef<HTMLInputElement | null>(null);
   const listRequestSeq = useRef(0);
   const selectedGroupIdRef = useRef(selectedGroupId);
   selectedGroupIdRef.current = selectedGroupId;
@@ -275,6 +309,65 @@ export function GroupProjectsPanel({
     }
   };
 
+  const handleBatchUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const selectedFiles = Array.from(files);
+    if (batchInputRef.current) batchInputRef.current.value = "";
+    const targetNotebookId = isNotebookScope ? (notebookId ?? null) : null;
+    const targetGroupId = !isNotebookScope ? (selectedGroup?.id ?? null) : null;
+    if (!targetNotebookId && !targetGroupId) return;
+    const scopeLabel = targetName || "当前电路库";
+
+    setBusyId("batch");
+    setBatchProgress({ current: 0, total: selectedFiles.length });
+    setBatchReport(null);
+    setError(null);
+    setNotice(null);
+
+    let approvedCount = 0;
+    let pendingCount = 0;
+    const failures: { fileName: string; reason: string }[] = [];
+
+    try {
+      for (let index = 0; index < selectedFiles.length; index++) {
+        const file = selectedFiles[index]!;
+        setBatchProgress({ current: index + 1, total: selectedFiles.length });
+        try {
+          const projectText = await file.text();
+          const name = extractBatchProjectName(file.name, projectText);
+          const payload = { name, description: "", projectText };
+          const created = targetNotebookId
+            ? await submitNotebookProject(targetNotebookId, payload)
+            : await submitGroupProject(targetGroupId!, payload);
+          if (created.status === "approved") approvedCount += 1;
+          else pendingCount += 1;
+        } catch (err) {
+          failures.push({
+            fileName: file.name,
+            reason: err instanceof Error ? err.message : "上传失败",
+          });
+        }
+      }
+
+      const succeeded = approvedCount + pendingCount;
+      let summary: string | null = null;
+      if (succeeded > 0) {
+        const detailParts: string[] = [];
+        if (approvedCount > 0) detailParts.push(`${approvedCount} 个已入库`);
+        if (pendingCount > 0) detailParts.push(`${pendingCount} 个待审核`);
+        summary = `批量上传到「${scopeLabel}」完成：成功 ${succeeded} 个（${detailParts.join("，")}）${failures.length > 0 ? `，失败 ${failures.length} 个` : ""}。`;
+        setReloadTick((v) => v + 1);
+        await refreshGroups();
+      }
+      if (summary || failures.length > 0) {
+        setBatchReport({ summary, failures });
+      }
+    } finally {
+      setBatchProgress(null);
+      setBusyId(null);
+    }
+  };
+
   const handleReview = async (
     item: GroupProjectSummary,
     decision: "approve" | "reject",
@@ -374,6 +467,7 @@ export function GroupProjectsPanel({
                 const next = event.target.value;
                 setSelectedGroupId(next);
                 onSelectGroup?.(next);
+                setBatchReport(null);
                 setNotice(null);
                 setError(null);
               }}
@@ -434,23 +528,47 @@ export function GroupProjectsPanel({
           </div>
         </div>
 
-        {currentProject && (isNotebookScope || selectedGroup) ? (
-          <button
-            type="button"
-            className="group-lib-btn group-lib-btn-primary"
-            onClick={() => {
-              setSubmitName(currentProject.name.trim() || "");
-              setSubmitOpen((open) => !open);
-            }}
-          >
-            {submitOpen
-              ? "取消上传"
-              : isNotebookScope
-                ? "上传当前电路到本笔记本"
-                : isPublicScope
-                  ? "上传当前电路到公共电路库"
-                  : "上传当前电路到本群组"}
-          </button>
+        {isNotebookScope || selectedGroup ? (
+          <div className="group-lib-toolbar-actions">
+            <input
+              ref={batchInputRef}
+              type="file"
+              multiple
+              accept=".json,.icproj.json"
+              aria-label="选择批量上传电路文件"
+              style={{ display: "none" }}
+              onChange={(event) => void handleBatchUpload(event.target.files)}
+            />
+            <button
+              type="button"
+              className="group-lib-btn"
+              disabled={busyId !== null}
+              onClick={() => batchInputRef.current?.click()}
+            >
+              {batchProgress
+                ? `批量上传中 (${batchProgress.current}/${batchProgress.total})…`
+                : "批量上传文件…"}
+            </button>
+            {currentProject ? (
+              <button
+                type="button"
+                className="group-lib-btn group-lib-btn-primary"
+                disabled={busyId === "batch"}
+                onClick={() => {
+                  setSubmitName(currentProject.name.trim() || "");
+                  setSubmitOpen((open) => !open);
+                }}
+              >
+                {submitOpen
+                  ? "取消上传"
+                  : isNotebookScope
+                    ? "上传当前电路到本笔记本"
+                    : isPublicScope
+                      ? "上传当前电路到公共电路库"
+                      : "上传当前电路到本群组"}
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </div>
 
@@ -492,6 +610,19 @@ export function GroupProjectsPanel({
         </div>
       ) : null}
 
+      {batchReport?.summary ? (
+        <div className="group-lib-notice" role="status">
+          {batchReport.summary}
+        </div>
+      ) : null}
+      {batchReport && batchReport.failures.length > 0 ? (
+        <div className="group-lib-error" role="alert">
+          以下 {batchReport.failures.length} 个文件上传失败：
+          {batchReport.failures
+            .map((item) => `${item.fileName}（${item.reason}）`)
+            .join("；")}
+        </div>
+      ) : null}
       {notice ? (
         <div className="group-lib-notice" role="status">
           {notice}

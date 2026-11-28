@@ -781,7 +781,11 @@ export function registerGroupLibraries(
     const token = bearerOf(c);
     if (!token) return c.json({ error: "unauthorized" }, 401);
     const user = c.get("sessionUser") as SessionUser;
-    const listed = await groups.list(token, user.isAdmin);
+    const listed = await groups.list(
+      token,
+      user.isAdmin,
+      user.notebookAdmin === true,
+    );
     if (!listed.ok)
       return listed.status === 401
         ? c.json({ error: "unauthorized" }, 401)
