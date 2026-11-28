@@ -235,7 +235,9 @@ is loaded, the page reads that token and asks `GET api/auth/me` with it
 (no redirects, no cookies, no HTTP cache):
 
 - no token, or a value that is not a well-formed token, or a 401: a signed-out
-  page with a link to silicon-notebook (`/`);
+  page with a link to silicon-notebook's sign-in page (`/?next=<encoded canvas URL>`,
+  falling back to `/` at root or on an invalid path) so signing in returns to
+  the original canvas page;
 - storage that cannot be read, a network failure, any other status, or an
   answer whose user is not a notebook user (a standalone server): an error page
   with Retry. The page never falls back to single-user behaviour;
