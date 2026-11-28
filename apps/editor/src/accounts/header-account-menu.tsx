@@ -105,7 +105,7 @@ export function HeaderAccountMenu({
             <div className="command-separator" role="separator" />
           </>
         ) : null}
-        {account?.isAdmin === true && (
+        {(account?.isAdmin === true || notebookUser?.isAdmin === true) && (
           <a
             href={appUrl("analytics")}
             target="_blank"

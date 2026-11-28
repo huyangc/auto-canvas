@@ -136,7 +136,6 @@ export function mountNotebookEditor(overrides: NotebookEntryOverrides = {}) {
       root.render(
         <EditorErrorBoundary>
           <App
-            analyticsHref={user.isAdmin ? baseUrl + "analytics" : undefined}
             services={services}
             publicAgentUiEnabled={false}
             notebookUser={{

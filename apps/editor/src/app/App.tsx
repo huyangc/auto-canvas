@@ -472,7 +472,6 @@ function defaultModeDocks(mode: EditorMode): ModeDocks {
 export interface AppProps {
   services: EditorServices;
   project?: CircuitProject;
-  analyticsHref?: string | undefined;
   /** Override the deployment's Agent UI capability in tests. */
   publicAgentUiEnabled?: boolean;
   /**
@@ -571,7 +570,6 @@ function propertiesMosBulkDefaultNetId(
 function WorkspaceEditor({
   project: initialProject,
   initialEditorMode,
-  analyticsHref,
   publicAgentUiEnabled: requestedAgentUi = PUBLIC_AGENT_UI_ENABLED,
   notebookUser,
   restoredWorkspace,
@@ -5221,7 +5219,6 @@ function WorkspaceEditor({
       ) : null}
       {renderCrashRequested() ? <RenderCrashProbe /> : null}
       <EditorMenuBar
-        analyticsHref={analyticsHref}
         projectStore={projectStore}
         publicAgentUiEnabled={publicAgentUiEnabled}
         setStatus={setStatus}

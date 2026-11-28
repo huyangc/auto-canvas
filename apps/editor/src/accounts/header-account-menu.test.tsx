@@ -268,6 +268,45 @@ describe("HeaderAccountMenu", () => {
     expect(markup).toContain("My Cloud Projects");
     expect(markup).toContain('data-testid="back-to-notebook"');
     expect(markup).toContain("返回 Silicon Notebook 群组");
+    expect(markup).not.toContain('data-testid="open-analytics"');
     expect(markup).not.toContain('data-testid="sign-out"');
+  });
+
+  it("opens analytics inside the Silicon Notebook user menu for admins and closes the menu", async () => {
+    vi.stubEnv("BASE_URL", "/canvas/");
+    try {
+      const host = document.createElement("div");
+      document.body.append(host);
+      root = createRoot(host);
+      await act(async () =>
+        root!.render(
+          <HeaderAccountMenu
+            cloudProjects={library()}
+            notebookUser={{
+              id: "u-admin",
+              displayName: "Local Curator",
+              isAdmin: true,
+            }}
+          />,
+        ),
+      );
+      const menu = host.querySelector<HTMLDetailsElement>(
+        '[data-testid="header-account-menu"]',
+      )!;
+      menu.open = true;
+      const link = menu.querySelector<HTMLAnchorElement>(
+        '[data-testid="open-analytics"]',
+      )!;
+      expect([link.pathname, link.target, link.rel]).toEqual([
+        "/canvas/analytics",
+        "_blank",
+        "noopener",
+      ]);
+      link.addEventListener("click", (e) => e.preventDefault());
+      link.click();
+      expect(menu.open).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

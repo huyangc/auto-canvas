@@ -313,8 +313,9 @@ lose what the standard editor would lose, and a copy kept only for the tab
 returns only in that tab. Other users' data stays in the browser profile,
 unshown and unencrypted; signing out does not remove it. In the editor's top
 bar, the notebook build renders the signed-in user's menu with their display
-name, **My Cloud Projects**, **Auto-save to Cloud**, and a link back to
-silicon-notebook (`/` or the originating group hash `/#groups&group=<id>`).
+name, **My Cloud Projects**, **User Analytics** (for administrators),
+**Auto-save to Cloud**, and a link back to silicon-notebook (`/` or the
+originating group hash `/#groups&group=<id>`).
 
 ### Notebook group-shared libraries
 

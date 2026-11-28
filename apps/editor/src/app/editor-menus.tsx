@@ -67,7 +67,6 @@ type ProjectTabSessions = ReturnType<typeof useProjectTabSessions>;
 /** The header: project tabs, File menu and toolbars, bound to the editor. */
 export function EditorMenuBar({
   projectStore,
-  analyticsHref,
   publicAgentUiEnabled,
   setStatus,
   setSelectionOpen,
@@ -141,7 +140,6 @@ export function EditorMenuBar({
   notebookUser,
 }: {
   projectStore: EditorServices["projectStore"];
-  analyticsHref?: string | undefined;
   publicAgentUiEnabled: boolean;
   setStatus: Dispatch<SetStateAction<string>>;
   setSelectionOpen: EditorPanels["setSelectionOpen"];
@@ -254,7 +252,6 @@ export function EditorMenuBar({
   };
   return (
     <EditorAppChrome
-      analyticsHref={analyticsHref}
       projectTabs={
         <>
           <ProjectTabs

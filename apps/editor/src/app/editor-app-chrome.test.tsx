@@ -249,4 +249,29 @@ describe("EditorAppChrome top bar New button and inline project rename", () => {
     expect(view.host.querySelector("input.app-project-name-input")).toBeNull();
     expect(onProjectNameEditingChange).toHaveBeenLastCalledWith(false);
   });
+
+  it("places User Analytics inside the account menu rather than as a standalone top-bar button in notebook mode", async () => {
+    const view = await mount(
+      chromeProps({
+        notebookUser: {
+          id: "u-admin",
+          displayName: "Local Curator",
+          isAdmin: true,
+        },
+      }),
+    );
+    const analyticsLinks = view.host.querySelectorAll(
+      '[data-testid="open-analytics"]',
+    );
+    expect(analyticsLinks).toHaveLength(1);
+    const accountMenu = view.host.querySelector(
+      '[data-testid="header-account-menu"]',
+    )!;
+    expect(accountMenu.contains(analyticsLinks[0]!)).toBe(true);
+    expect(
+      view.host.querySelector(
+        '.app-chrome-actions > [data-testid="open-analytics"]',
+      ),
+    ).toBeNull();
+  });
 });
