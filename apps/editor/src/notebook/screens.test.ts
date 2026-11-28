@@ -17,11 +17,17 @@ it("shows each gate screen under a stable test id, replacing what was there", ()
   const signedOut = container.querySelector(
     '[data-testid="notebook-signed-out"]',
   )!;
+  expect(signedOut.getAttribute("lang")).toBe("zh-CN");
   expect(signedOut.querySelector("a")!.getAttribute("href")).toBe("/");
   expect(signedOut.querySelectorAll("a")).toHaveLength(1);
   expect(container.children).toHaveLength(1);
   const retry = vi.fn();
   showGateScreen(container, "error", retry);
+  expect(
+    container
+      .querySelector('[data-testid="notebook-error"]')!
+      .getAttribute("lang"),
+  ).toBeNull();
   container
     .querySelector<HTMLButtonElement>('[data-testid="notebook-error"] button')!
     .click();

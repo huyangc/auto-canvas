@@ -191,6 +191,7 @@ export function showGateScreen(
   body.className = "notebook-gate-body";
 
   if (screen === "signed-out") {
+    main.lang = "zh-CN";
     const title = page.createElement("h1");
     title.className = "notebook-gate-title";
     title.textContent = "请先登录 Silicon Notebook";
