@@ -1,7 +1,10 @@
 import { terminalCurrentDirectionPartners } from "../features/properties/terminal-current-direction";
 import { createIndependentProject, parseProject } from "@icm/project-protocol";
 import { apiUrl } from "../lib/app-url";
-import type { HeaderNotebookUser } from "../accounts/header-account-menu";
+import type {
+  HeaderCloudProjectsScope,
+  HeaderNotebookUser,
+} from "../accounts/header-account-menu";
 import { useCloudProjects } from "./use-cloud-projects";
 import {
   openLibraryExample,
@@ -954,6 +957,13 @@ function WorkspaceEditor({
   const [documentSettingsOpen, setDocumentSettingsOpen] = useState(false);
   const [projectInfoOpen, setProjectInfoOpen] = useState(false);
   const [cloudProjectsOpen, setCloudProjectsOpen] = useState(false);
+  const [cloudProjectsInitialScope, setCloudProjectsInitialScope] = useState<
+    HeaderCloudProjectsScope | undefined
+  >(undefined);
+  const openCloudProjects = useCallback((scope?: HeaderCloudProjectsScope) => {
+    setCloudProjectsInitialScope(scope);
+    setCloudProjectsOpen(true);
+  }, []);
   const [activeNotebookGroupId, setActiveNotebookGroupId] = useState<
     string | null
   >(() => {
@@ -988,16 +998,27 @@ function WorkspaceEditor({
     notebookId: string;
     projectId: string;
   } | null>(null);
+  const [pendingGroupProject, setPendingGroupProject] = useState<{
+    groupId: string;
+    projectId: string;
+  } | null>(null);
+  const [pendingCloudProjectId, setPendingCloudProjectId] = useState<
+    string | null
+  >(null);
   useEffect(() => {
     if (!notebookUser || typeof window === "undefined") return;
     const url = new URL(window.location.href);
     const group = url.searchParams.get("group")?.trim();
+    const groupProject = url.searchParams.get("groupProject")?.trim();
     const notebook = url.searchParams.get("notebook")?.trim();
     const notebookProject = url.searchParams.get("notebookProject")?.trim();
+    const cloudProject = url.searchParams.get("project")?.trim();
     const view = url.searchParams.get("view")?.trim();
-    if (!group && !notebook) return;
-    if (notebookProject || view) {
+    if (!group && !notebook && !cloudProject) return;
+    if (notebookProject || groupProject || cloudProject || view) {
       url.searchParams.delete("notebookProject");
+      url.searchParams.delete("groupProject");
+      url.searchParams.delete("project");
       url.searchParams.delete("view");
       window.history.replaceState(
         null,
@@ -1012,9 +1033,22 @@ function WorkspaceEditor({
       });
       return;
     }
+    if (group && groupProject) {
+      setPendingGroupProject({
+        groupId: group,
+        projectId: groupProject,
+      });
+      return;
+    }
+    if (cloudProject) {
+      setPendingCloudProjectId(cloudProject);
+      return;
+    }
     if (view === "components") setUserComponentsOpen(true);
-    else if (view === "projects" || (!notebook && group && !view))
+    else if (view === "projects" || (!notebook && group && !view)) {
+      setCloudProjectsInitialScope(undefined);
       setCloudProjectsOpen(true);
+    }
   }, [notebookUser]);
   const projectNameEditing = useRef(false);
   const {
@@ -5186,6 +5220,55 @@ function WorkspaceEditor({
         );
       });
   }, [pendingNotebookProject, notebookUser, projectTabs, createTabSession]);
+  useEffect(() => {
+    if (!pendingGroupProject || !notebookUser) return;
+    const { groupId, projectId } = pendingGroupProject;
+    setPendingGroupProject(null);
+    void fetch(
+      apiUrl(
+        `notebook/groups/${encodeURIComponent(groupId)}/projects/${encodeURIComponent(projectId)}`,
+      ),
+      { cache: "no-store" },
+    )
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = (await response.json()) as {
+          project?: { name?: string; projectText?: string };
+        };
+        const name = payload.project?.name;
+        const projectText = payload.project?.projectText;
+        if (!name || typeof projectText !== "string")
+          throw new Error("Invalid circuit payload");
+        const parsed = parseProject(projectText);
+        const copy = createIndependentProject(
+          parsed,
+          createId("project"),
+          name,
+        );
+        const opened = await projectTabs.open(() => createTabSession(copy));
+        if (opened) {
+          setStatus(`Opened group circuit "${name}" as a working copy`);
+        }
+      })
+      .catch((error: unknown) => {
+        setStatus(
+          `Could not open group circuit: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  }, [pendingGroupProject, notebookUser, projectTabs, createTabSession]);
+  useEffect(() => {
+    if (!pendingCloudProjectId || !notebookUser || !projectStore) return;
+    if (!cloudProjectsReady) return;
+    const id = pendingCloudProjectId;
+    setPendingCloudProjectId(null);
+    void openCloudProjectById(id, true);
+  }, [
+    pendingCloudProjectId,
+    notebookUser,
+    projectStore,
+    cloudProjectsReady,
+    openCloudProjectById,
+  ]);
 
   return (
     <main className="app-shell">
@@ -5238,7 +5321,7 @@ function WorkspaceEditor({
         documentSettingsOpen={documentSettingsOpen}
         setDocumentSettingsOpen={setDocumentSettingsOpen}
         setProjectInfoOpen={setProjectInfoOpen}
-        setCloudProjectsOpen={setCloudProjectsOpen}
+        openCloudProjects={openCloudProjects}
         projectNameEditing={projectNameEditing}
 
         cloudManagementBusy={cloudManagementBusy}
@@ -5349,6 +5432,7 @@ function WorkspaceEditor({
         projectInfoOpen={projectInfoOpen}
         setProjectInfoOpen={setProjectInfoOpen}
         cloudProjectsOpen={cloudProjectsOpen}
+        {...(cloudProjectsInitialScope ? { cloudProjectsInitialScope } : {})}
         setCloudProjectsOpen={setCloudProjectsOpen}
         cloudProjectsBusy={projectTabs.busy || cloudManagementBusy}
         openCloudProjectById={openCloudProjectById}

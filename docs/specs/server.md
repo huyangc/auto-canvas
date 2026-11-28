@@ -327,24 +327,34 @@ over loopback with the caller's bearer token and exposes per-group shared
 circuit projects (`group_projects`) and shared user components
 (`group_components`, migration `007-group-shared-libraries.sql`):
 
-- `GET /api/notebook/groups` lists the caller's groups (or all groups for a
-  system admin) with approved counts and, for group admins, pending counts.
+- `GET /api/notebook/groups` lists the caller's groups (including any
+  deployment-wide public groups where `is_public: true`, or all groups for a
+  system admin) with `isPublic`, approved counts, and, for group admins, pending
+  counts. Public groups are visible to all signed-in users even without a
+  `group_members` row (`my_role: ""`), while `isAdmin` stays restricted to
+  `my_role: "admin"` or system admins.
 - `GET/POST /api/notebook/groups/:groupId/projects` and
   `GET/POST /api/notebook/groups/:groupId/components` list (`status=approved`,
   `pending` for group admins, or `mine`) and submit items. Group admins
   (`my_role: "admin"` or system admins) publish directly as `approved`; regular
-  group members submit as `pending`, invisible in the approved library until a
-  group admin approves them via `POST …/:id/review` (`{decision: "approve" | "reject", note?}`).
+  group members (and non-admin signed-in users on public groups) submit as
+  `pending`, invisible in the approved library until an admin approves them via
+  `POST …/:id/review` (`{decision: "approve" | "reject", note?}`).
 - `GET /api/notebook/groups/:groupId/projects/:id`,
   `GET /api/notebook/groups/:groupId/projects/:id/preview.svg`, and
   `GET /api/notebook/groups/:groupId/components/:id` return full content for
-  approved entries to any group member, and for pending/rejected entries only
-  to the author or a group admin.
+  approved entries to any group member (or any signed-in user for public
+  groups), and for pending/rejected entries only to the author or a group admin.
 - `DELETE /api/notebook/groups/:groupId/{projects|components}/:id` lets group
   admins remove any entry and authors withdraw their own pending or rejected
   submissions.
-- Opening `/canvas/?group=<groupId>` (or `&view=components`) pre-selects that
-  group in the Cloud Projects or User Components modal.
+- In notebook mode, the header account menu lists **我的电路库**, **群组电路库**,
+  and **公共电路库**, each opening the **电路图库** dialog directly on the
+  matching scope tab (`personal`, `groups`, or `public`). Opening
+  `/canvas/?group=<groupId>` (or `&view=components`) pre-selects that group in
+  the dialog (switching to the public tab automatically if the group is public);
+  `/canvas/?group=<groupId>&groupProject=<id>` opens that group/public circuit
+  as a working copy, and `/canvas/?project=<id>` opens a personal cloud project.
 - The same approval workflow is also exposed per Silicon Notebook under
   `/api/notebook/notebooks/:notebookId/{projects|components}`
   (`notebook_projects` / `notebook_components`), authorized against

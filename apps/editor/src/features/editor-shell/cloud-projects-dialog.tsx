@@ -18,6 +18,8 @@ const GroupProjectsPanel = import.meta.env.ICM_NOTEBOOK
     )
   : null;
 
+export type CloudProjectsScope = "personal" | "notebook" | "groups" | "public";
+
 export interface CloudProjectsDialogProps {
   busy: boolean;
   onOpenProject(id: string): void;
@@ -27,6 +29,8 @@ export interface CloudProjectsDialogProps {
   onClose(): void;
   /** Notebook mode: current active project for uploading to a group/notebook library. */
   currentProject?: CircuitProject | undefined;
+  /** Notebook mode: pre-selected scope tab when opening the dialog. */
+  initialScope?: CloudProjectsScope | undefined;
   /** Notebook mode: pre-selected group id (e.g. from ?group=<id>). */
   initialGroupId?: string | null | undefined;
   /** Notebook mode: originating Silicon Notebook id/name (e.g. from ?notebook=<id>). */
@@ -52,6 +56,7 @@ export function CloudProjectsDialog({
   onProjectsChanged,
   onClose,
   currentProject,
+  initialScope,
   initialGroupId,
   activeNotebookId,
   activeNotebookName,
@@ -65,8 +70,15 @@ export function CloudProjectsDialog({
   const closingRef = useRef(false);
   const { onPointerDown: onHeaderPointerDown, release } =
     useDialogDrag(dialogRef);
-  const [scope, setScope] = useState<"personal" | "notebook" | "groups">(() => {
-    if (!GroupProjectsPanel) return "personal";
+  const hasNotebookLibraries = Boolean(
+    GroupProjectsPanel && onOpenGroupProject,
+  );
+  const [scope, setScope] = useState<CloudProjectsScope>(() => {
+    if (!hasNotebookLibraries) return "personal";
+    if (initialScope) {
+      if (initialScope === "notebook" && !activeNotebookId) return "personal";
+      return initialScope;
+    }
     if (activeNotebookId) return "notebook";
     if (initialGroupId) return "groups";
     return "personal";
@@ -149,11 +161,13 @@ export function CloudProjectsDialog({
           onHeaderPointerDown(event);
         }}
       >
-        <h2 id="cloud-shelf-title">Cloud Projects</h2>
+        <h2 id="cloud-shelf-title">
+          {hasNotebookLibraries ? "电路图库" : "Cloud Projects"}
+        </h2>
         <DialogCloseButton onClick={closeDialog} />
       </header>
       <div className="cloud-shelf-body">
-        {GroupProjectsPanel && onOpenGroupProject ? (
+        {hasNotebookLibraries ? (
           <div
             className="notebook-scope-bar"
             role="tablist"
@@ -166,7 +180,7 @@ export function CloudProjectsDialog({
               aria-selected={scope === "personal"}
               onClick={() => setScope("personal")}
             >
-              我的云端项目
+              我的电路库
             </button>
             {activeNotebookId ? (
               <button
@@ -186,7 +200,16 @@ export function CloudProjectsDialog({
               aria-selected={scope === "groups"}
               onClick={() => setScope("groups")}
             >
-              群组电路图库
+              群组电路库
+            </button>
+            <button
+              type="button"
+              role="tab"
+              className="notebook-scope-tab"
+              aria-selected={scope === "public"}
+              onClick={() => setScope("public")}
+            >
+              公共电路库
             </button>
           </div>
         ) : null}
@@ -205,15 +228,27 @@ export function CloudProjectsDialog({
               onOpenGroupProject={handleOpenGroupProject}
             />
           </Suspense>
-        ) : scope === "groups" && GroupProjectsPanel && onOpenGroupProject ? (
+        ) : (scope === "groups" || scope === "public") &&
+          GroupProjectsPanel &&
+          onOpenGroupProject ? (
           <Suspense
-            fallback={<p className="shelf-status">正在加载群组电路图库…</p>}
+            fallback={
+              <p className="shelf-status">
+                {scope === "public"
+                  ? "正在加载公共电路库…"
+                  : "正在加载群组电路库…"}
+              </p>
+            }
           >
             <GroupProjectsPanel
-              key="groups"
+              key={scope}
               currentProject={currentProject}
+              groupVisibility={scope === "public" ? "public" : "private"}
               initialGroupId={initialGroupId}
               onSelectGroup={onSelectGroup}
+              onDeepLinkVisibilityMismatch={(visibility) => {
+                setScope(visibility === "public" ? "public" : "groups");
+              }}
               onOpenGroupProject={handleOpenGroupProject}
             />
           </Suspense>

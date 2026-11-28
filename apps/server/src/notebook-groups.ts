@@ -7,6 +7,7 @@ export interface NotebookGroup {
   description: string;
   ownerId: string;
   myRole: string;
+  isPublic: boolean;
   isAdmin: boolean;
   memberCount: number;
 }
@@ -49,6 +50,7 @@ function parseGroup(raw: unknown, systemAdmin: boolean): NotebookGroup | null {
     typeof record.description === "string" ? record.description : "";
   const ownerId = typeof record.owner_id === "string" ? record.owner_id : "";
   const myRole = typeof record.my_role === "string" ? record.my_role : "";
+  const isPublic = record.is_public === true;
   const memberCount =
     typeof record.member_count === "number" &&
     Number.isInteger(record.member_count) &&
@@ -62,6 +64,7 @@ function parseGroup(raw: unknown, systemAdmin: boolean): NotebookGroup | null {
     description,
     ownerId,
     myRole,
+    isPublic,
     isAdmin: myRole === "admin" || systemAdmin,
     memberCount,
   };
@@ -190,7 +193,8 @@ export function createNotebookGroups({
       }
       const group = parseGroup(result.data, systemAdmin);
       if (!group) return { ok: false, status: 503 };
-      if (!group.myRole && !systemAdmin) return { ok: false, status: 404 };
+      if (!group.myRole && !group.isPublic && !systemAdmin)
+        return { ok: false, status: 404 };
       return { ok: true, group };
     },
 

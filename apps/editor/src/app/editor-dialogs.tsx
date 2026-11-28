@@ -29,6 +29,7 @@ import type { createEditorNavigationController } from "../features/hierarchy/edi
 import type { createProjectStructureCommands } from "../features/hierarchy/project-structure-commands";
 import type { useNetlistExportPreferences } from "../features/netlist-export/netlist-export-preferences";
 import type { EditorServices } from "../services/editor-services";
+import type { CloudProjectsScope } from "../features/editor-shell/cloud-projects-dialog";
 import { EditorDialogLayer } from "./editor-dialog-layer";
 import type { createEditorTransactionCommands } from "./editor-transaction-commands";
 import type {
@@ -89,6 +90,7 @@ export function EditorDialogs({
   projectInfoOpen,
   setProjectInfoOpen,
   cloudProjectsOpen,
+  cloudProjectsInitialScope,
   setCloudProjectsOpen,
   cloudProjectsBusy,
   openCloudProjectById,
@@ -193,6 +195,7 @@ export function EditorDialogs({
   projectInfoOpen: boolean;
   setProjectInfoOpen: Dispatch<SetStateAction<boolean>>;
   cloudProjectsOpen: boolean;
+  cloudProjectsInitialScope?: CloudProjectsScope;
   setCloudProjectsOpen: Dispatch<SetStateAction<boolean>>;
   cloudProjectsBusy: boolean;
   openCloudProjectById: ProjectFileLifecycle["openCloudProjectById"];
@@ -368,6 +371,9 @@ export function EditorDialogs({
               ...(openGroupProjectCopy
                 ? {
                     currentProject: project,
+                    ...(cloudProjectsInitialScope
+                      ? { initialScope: cloudProjectsInitialScope }
+                      : {}),
                     initialGroupId: activeNotebookGroupId,
                     activeNotebookId,
                     activeNotebookName,

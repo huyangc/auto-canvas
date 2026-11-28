@@ -25,10 +25,13 @@ import "./group-libraries.css";
 
 export interface GroupProjectsPanelProps {
   currentProject?: CircuitProject | undefined;
+  groupVisibility?: "all" | "private" | "public" | undefined;
   initialGroupId?: string | null | undefined;
   notebookId?: string | null | undefined;
   notebookName?: string | null | undefined;
   onSelectGroup?: ((groupId: string) => void) | undefined;
+  onDeepLinkVisibilityMismatch?:
+    ((visibility: "private" | "public") => void) | undefined;
   onOpenGroupProject(
     name: string,
     projectText: string,
@@ -52,13 +55,16 @@ function formatTime(value: string): string {
 
 export function GroupProjectsPanel({
   currentProject,
+  groupVisibility = "all",
   initialGroupId,
   notebookId,
   notebookName,
   onSelectGroup,
+  onDeepLinkVisibilityMismatch,
   onOpenGroupProject,
 }: GroupProjectsPanelProps) {
   const isNotebookScope = Boolean(notebookId);
+  const isPublicScope = !isNotebookScope && groupVisibility === "public";
   const [notebookSpace, setNotebookSpace] = useState<NotebookSpaceInfo | null>(
     null,
   );
@@ -103,7 +109,13 @@ export function GroupProjectsPanel({
     setGroupsLoading(true);
     setError(null);
     try {
-      const list = await listNotebookGroups();
+      const allGroups = await listNotebookGroups();
+      const list =
+        groupVisibility === "public"
+          ? allGroups.filter((item) => item.isPublic === true)
+          : groupVisibility === "private"
+            ? allGroups.filter((item) => !item.isPublic)
+            : allGroups;
       setGroups(list);
       const current = selectedGroupIdRef.current;
       let nextGroupId = "";
@@ -114,7 +126,20 @@ export function GroupProjectsPanel({
         if (list.some((item) => item.id === initialGroupId)) {
           nextGroupId = initialGroupId;
         } else {
-          missingDeepLink = true;
+          const matchedInAll = allGroups.find(
+            (item) => item.id === initialGroupId,
+          );
+          if (matchedInAll && onDeepLinkVisibilityMismatch) {
+            onDeepLinkVisibilityMismatch(
+              matchedInAll.isPublic ? "public" : "private",
+            );
+            return;
+          }
+          if (groupVisibility === "all") {
+            missingDeepLink = true;
+          } else {
+            nextGroupId = list[0]?.id ?? "";
+          }
         }
       } else {
         nextGroupId = list[0]?.id ?? "";
@@ -136,7 +161,12 @@ export function GroupProjectsPanel({
     } finally {
       setGroupsLoading(false);
     }
-  }, [initialGroupId, isNotebookScope]);
+  }, [
+    groupVisibility,
+    initialGroupId,
+    isNotebookScope,
+    onDeepLinkVisibilityMismatch,
+  ]);
 
   useEffect(() => {
     void refreshGroups();
@@ -306,7 +336,13 @@ export function GroupProjectsPanel({
   };
 
   if (groupsLoading) {
-    return <p className="group-lib-empty">正在加载 Silicon Notebook 群组…</p>;
+    return (
+      <p className="group-lib-empty">
+        {isPublicScope
+          ? "正在加载公共电路库…"
+          : "正在加载 Silicon Notebook 群组…"}
+      </p>
+    );
   }
 
   if (!isNotebookScope && groups.length === 0) {
@@ -314,8 +350,9 @@ export function GroupProjectsPanel({
       <div className="group-lib-panel">
         {error ? <div className="group-lib-error">{error}</div> : null}
         <p className="group-lib-empty">
-          你目前尚未加入任何 Silicon Notebook 群组。请先在 Silicon Notebook
-          的群组页面创建或加入群组。
+          {isPublicScope
+            ? "当前暂未配置全员可见的公共群组，请联系系统管理员在 Silicon Notebook 中创建或开启默认公共群组。"
+            : "你目前尚未加入任何 Silicon Notebook 群组。请先在 Silicon Notebook 的群组页面创建或加入群组。"}
         </p>
       </div>
     );
@@ -409,7 +446,9 @@ export function GroupProjectsPanel({
               ? "取消上传"
               : isNotebookScope
                 ? "上传当前电路到本笔记本"
-                : "上传当前电路到本群组"}
+                : isPublicScope
+                  ? "上传当前电路到公共电路库"
+                  : "上传当前电路到本群组"}
           </button>
         ) : null}
       </div>
@@ -472,7 +511,9 @@ export function GroupProjectsPanel({
           {filter === "approved"
             ? isNotebookScope
               ? "本笔记本还没有已入库的电路工程。"
-              : "该群组还没有已入库的电路工程。"
+              : isPublicScope
+                ? "公共电路库还没有已入库的电路工程。"
+                : "该群组还没有已入库的电路工程。"
             : filter === "pending"
               ? "当前没有待审核的电路工程提交。"
               : "你还没有提交过电路工程。"}

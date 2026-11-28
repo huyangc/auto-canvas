@@ -12,6 +12,7 @@ export interface NotebookGroupInfo {
   description: string;
   ownerId: string;
   myRole: string;
+  isPublic?: boolean;
   isAdmin: boolean;
   memberCount: number;
   approvedProjectCount: number;
