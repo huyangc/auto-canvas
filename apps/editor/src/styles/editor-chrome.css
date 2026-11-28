@@ -800,13 +800,16 @@
   border: 1px solid transparent;
   border-radius: 6px;
   box-shadow: none;
-  color: var(--icm-text);
-  background: var(--icm-surface);
   font-size: var(--icm-font-md);
   font-weight: 500;
   text-align: left;
-  text-decoration: none;
   white-space: nowrap;
+}
+
+.command-popover a:not(:where(.cloud-shelf-dialog *)) {
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  text-decoration: none;
   transition:
     border-color 120ms ease,
     background-color 120ms ease,
