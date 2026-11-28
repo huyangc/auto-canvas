@@ -2075,22 +2075,18 @@ button.app-project-name:focus-visible .app-project-name-edit-icon {
   }
 }
 
+.project-unsaved-indicator--compact {
+  display: none;
+  flex: 0 0 auto;
+}
+
 @media (max-width: 720px) {
-  .app-chrome-main
-    .app-brand
-    > .app-project-name:not(:has(.project-unsaved-indicator)) {
+  .app-chrome-main .app-brand > .app-project-name {
     display: none;
   }
 
-  .app-chrome-main
-    .app-brand
-    > .app-project-name:has(.project-unsaved-indicator) {
-    min-width: 0;
-    padding: 0 2px;
-  }
-
-  .app-chrome-main .app-brand > .app-project-name .app-project-name-text,
-  .app-chrome-main .app-brand > .app-project-name .app-project-name-edit-icon {
-    display: none;
+  .project-unsaved-indicator--compact {
+    display: inline-flex;
+    align-items: center;
   }
 }

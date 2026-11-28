@@ -358,6 +358,15 @@ export function EditorAppChrome({
             onEditingChange={onProjectNameEditingChange}
             onOpenInfo={fileCommands.onOpenInfo}
           />
+          {hasUnsavedWork ? (
+            <span
+              className="project-unsaved-indicator project-unsaved-indicator--compact"
+              aria-label="Unsaved changes"
+              title="Unsaved changes"
+            >
+              ●
+            </span>
+          ) : null}
           <div className="app-history" role="group" aria-label="History">
             <button
               type="button"
