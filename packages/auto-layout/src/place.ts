@@ -73,6 +73,11 @@ import { isMos } from "./net-roles.js";
 import { placeMarkers } from "./place-markers.js";
 import { touchingPins, type PinContact } from "./pin-contacts.js";
 import { alignStacks, draftStrategy, isStackStrategy } from "./stack-snap.js";
+import {
+  skeletonSaDraftEligible,
+  skeletonStageSeed,
+  solveSkeletonSaDraft,
+} from "./skeleton-sa.js";
 import { solveMctsDraft } from "./mcts-placement.js";
 import { solveConventionDraft } from "./convention-solver.js";
 import type {
@@ -493,29 +498,45 @@ export function placeDocument(
     targets = structuredClone(draft.placements);
     // R168 chose every pose; R21 leaves them alone.
     oriented = new Set(targets.keys());
-  } else if (strategy === "mcts") {
-    // R171: offered only for its recognized subset (see auto-layout.ts), and
-    // solved once per planning call. A draft that cannot be built is
-    // refused (R63); the other strategies still plan the Document.
+  } else if (strategy === "mcts" || strategy === "skeleton-sa") {
+    const skeleton = strategy === "skeleton-sa";
+    const rule = skeleton ? "R174" : "R171";
+    // R171/R174 drafts share the completeness and symmetry admission checks.
     const draft = planningMemo<{
       placements?: Map<string, Placement>;
       problem?: string;
-    }>(document, resolver, "mcts-draft", () => {
-      try {
-        return solveMctsDraft(document, resolver);
-      } catch {
-        return { problem: "R171: draft failed" };
-      }
-    });
+    }>(
+      document,
+      resolver,
+      skeleton
+        ? `skeleton-sa:${JSON.stringify([roles.pitch, roles.seriesLevels, roles.unsplitSymmetry, roles.mirrorSymmetry, roles.symmetricHalfOrder, options.search?.seed])}`
+        : "mcts-draft",
+      () => {
+        try {
+          return skeleton
+            ? solveSkeletonSaDraft(
+                document,
+                resolver,
+                roles,
+                templates,
+                topology,
+                options,
+              )
+            : solveMctsDraft(document, resolver);
+        } catch {
+          return { problem: `${rule}: draft failed` };
+        }
+      },
+    );
     if (!draft.placements)
       return {
         placements: targets,
-        problem: draft.problem ?? "R171: draft failed",
+        problem: draft.problem ?? `${rule}: draft failed`,
       };
     if (devices.some((i) => !draft.placements!.has(i.id)))
       return {
         placements: targets,
-        problem: "R171: draft left a device unplaced",
+        problem: `${rule}: draft left a device unplaced`,
       };
     targets = structuredClone(draft.placements);
     // The independent column and facing decisions can split an R89/R145 or
@@ -539,20 +560,26 @@ export function placeDocument(
       )
         return {
           placements: targets,
-          problem: "R171: draft breaks recognized symmetry",
+          problem: `${rule}: draft breaks recognized symmetry`,
         };
     }
-    // R171 chose every pose; R21 leaves them alone.
+    // Both solvers choose every pose; R21 preserves those orientations.
     oriented = new Set(targets.keys());
   } else if (draftStrategy(strategy) === "stages") {
-    ({ placements: targets, sideRow } = placeStages(
-      document,
-      devices,
-      resolver,
-      roles,
-      templates,
-      topology,
-    ));
+    // Finishing can mutate targets. Keep the R174 seed immutable until SA.
+    const stage = skeletonSaDraftEligible(document, resolver, options)
+      ? structuredClone(
+          skeletonStageSeed(
+            document,
+            devices,
+            resolver,
+            roles,
+            templates,
+            topology,
+          ),
+        )
+      : placeStages(document, devices, resolver, roles, templates, topology);
+    ({ placements: targets, sideRow } = stage);
   } else if (
     (devices.some((i) => {
       const drain = roles.pinNet(i.id, "D");

@@ -9,6 +9,7 @@ import {
 } from "./differential-branches.js";
 import { aprDetailPlace } from "./apr-detail-place.js";
 import { feedbackRowCircuit, hasTransistor } from "./feedback-rows.js";
+import { skeletonSaDraftEligible } from "./skeleton-sa.js";
 import { mctsDraftEligible } from "./mcts-placement.js";
 import { conventionDraftEligible } from "./convention-relations.js";
 import { netlistMirrorSeats } from "./netlist-mirror-seats.js";
@@ -1443,19 +1444,18 @@ function selectFinalLayout(
     finalists.alternate = kind;
     const candidate = finish();
     if (stopped()) return best;
-    best = preferIntact(
+    const guarded = selectFinishedLayout(
       document,
       resolver,
-      selectFinishedLayout(
-        document,
-        resolver,
-        best,
-        candidate,
-        options.partition,
-        kind,
-      ),
+      best,
       candidate,
+      options.partition,
+      kind,
     );
+    best =
+      kind === "skeletonSa"
+        ? guarded
+        : preferIntact(document, resolver, guarded, candidate);
   }
   return recover();
 }
@@ -2526,6 +2526,51 @@ function planAutoLayoutMeasured(
           },
         }
       : undefined;
+  const skeletonSaFinalist = (() => {
+    if (
+      stopped() ||
+      options.finalists?.alternate ||
+      !skeletonSaDraftEligible(document, resolver, options)
+    )
+      return;
+    const run = route("skeleton-sa", emptyOverrides());
+    const candidate = runs.get(run.result)!;
+    const before = selected.run.final;
+    if (
+      !run.final ||
+      !Number.isFinite(routedScore(run, resolver)) ||
+      [
+        ...originals,
+        ...aligned,
+        ...incumbent.refined,
+        ...(withMcts?.refined ?? []),
+        ...(solved ? [solved] : []),
+      ].some((c) => edits(c) === edits(candidate)) ||
+      (before && !distinctPlacements(before, run.final))
+    )
+      return;
+    if (options.finalists) {
+      if (
+        !connectionsIntact(run.final, resolver) ||
+        (before && !shouldFinishRunner(selected.run, run, resolver))
+      )
+        return;
+    } else if (before) {
+      const completeness =
+        floatingPins(run.final, resolver).length +
+        missingConnections(run.final, resolver) -
+        floatingPins(before, resolver).length -
+        missingConnections(before, resolver);
+      if (
+        completeness > 0 ||
+        (completeness === 0 &&
+          routedScore(run, resolver) >= routedScore(selected.run, resolver)) ||
+        !skeletonRoutingSafe(before, run.final, resolver)
+      )
+        return;
+    }
+    return candidate;
+  })();
   // Snapshot the other refined run before facing/rerouting mutates results.
   // The existing winner (including its annealed fallback) is finished first.
   const runner = refinedFinalists
@@ -3127,6 +3172,7 @@ function planAutoLayoutMeasured(
               baseline,
               [...runs.values()].filter(
                 (run) =>
+                  run.strategy !== "skeleton-sa" &&
                   (chosen.portfolio !== ranked ||
                     !isStackStrategy(run.strategy)) &&
                   ((!!withMcts && !deferMctsToFinalist) ||
@@ -3635,6 +3681,7 @@ function planAutoLayoutMeasured(
       ["runner", alternateFinalist],
       ["convention", conventionFinalist],
       ["mcts", mctsFinalist],
+      ["skeletonSa", skeletonSaFinalist],
       [
         "unsplitSymmetry",
         symmetryFinalist?.kind === "unsplitSymmetry"
@@ -3693,6 +3740,9 @@ function planAutoLayoutMeasured(
       convention: conventionFinalist
         ? () => finishFinalist(conventionFinalist, false)
         : () => copyResult(snapshot),
+      skeletonSa: skeletonSaFinalist
+        ? () => finishFinalist(skeletonSaFinalist, false)
+        : () => copyResult(snapshot),
       mcts: mctsFinalist
         ? () => finishFinalist(mctsFinalist, false)
         : () => copyResult(snapshot),
@@ -3704,8 +3754,36 @@ function planAutoLayoutMeasured(
         ? () => finishFinalist(localFinalist, false, { localLoopDraft: true })
         : () => copyResult(snapshot),
     });
+  } else if (skeletonSaFinalist && !stopped()) {
+    const candidate = finishFinalist(skeletonSaFinalist, false);
+    const before = finishedDocument(document, resolver, base);
+    const after = finishedDocument(document, resolver, candidate);
+    if (after && (!before || skeletonRoutingSafe(before, after, resolver)))
+      return selectFinishedLayout(
+        document,
+        resolver,
+        base,
+        candidate,
+        options.partition,
+        "skeletonSa",
+      );
   }
   return base;
+}
+
+function skeletonRoutingSafe(
+  before: SchematicDocument,
+  after: SchematicDocument,
+  resolver: SymbolResolver,
+) {
+  const limits = routedGuards(before, resolver);
+  return (
+    auditRouting(after, resolver).unsafeProblems.length <=
+      auditRouting(before, resolver).unsafeProblems.length &&
+    Object.entries(routedGuards(after, resolver)).every(
+      ([key, value]) => value <= (limits[key] ?? 0),
+    )
+  );
 }
 
 /**

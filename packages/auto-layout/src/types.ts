@@ -10,6 +10,7 @@ export type LayoutStrategy =
   | "stages"
   | "feedback-rows"
   | "mcts"
+  | "skeleton-sa"
   | "convention"
   | "template+stack"
   | "layered+stack"
