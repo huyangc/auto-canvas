@@ -274,4 +274,46 @@ describe("EditorAppChrome top bar New button and inline project rename", () => {
       ),
     ).toBeNull();
   });
+
+  it("shows a top-left Silicon Notebook home icon in notebook mode and keeps unsaved dot off the File button", async () => {
+    const view = await mount(
+      chromeProps({
+        hasUnsavedWork: true,
+        notebookUser: {
+          id: "u1",
+          displayName: "Local Curator",
+          isAdmin: false,
+          backHref: "/#groups&group=grp-1",
+          backLabel: "返回 Silicon Notebook 群组",
+        },
+      }),
+    );
+    const homeLink = view.host.querySelector<HTMLAnchorElement>(
+      '[data-testid="notebook-home-link"]',
+    )!;
+    expect(homeLink).not.toBeNull();
+    expect(homeLink.getAttribute("href")).toBe("/#groups&group=grp-1");
+    expect(homeLink.getAttribute("aria-label")).toBe(
+      "返回 Silicon Notebook 群组",
+    );
+
+    // Unsaved indicator appears beside project name only, never inside the File button.
+    const dots = view.host.querySelectorAll(
+      '[data-testid="project-unsaved-indicator"]',
+    );
+    expect(dots).toHaveLength(1);
+    const projectNameBtn = view.host.querySelector(".app-project-name")!;
+    expect(projectNameBtn.contains(dots[0]!)).toBe(true);
+    const fileToggle = view.host.querySelector(
+      '[data-testid="project-menu-toggle"]',
+    )!;
+    expect(fileToggle.querySelector(".project-unsaved-indicator")).toBeNull();
+  });
+
+  it("omits the Silicon Notebook home icon outside notebook mode", async () => {
+    const view = await mount(chromeProps());
+    expect(
+      view.host.querySelector('[data-testid="notebook-home-link"]'),
+    ).toBeNull();
+  });
 });
