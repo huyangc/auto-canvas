@@ -72,6 +72,18 @@ const app = createApp({
     if (url.pathname === "/api/me") {
       return Response.json(profile);
     }
+    if (url.pathname === "/api/admin/users") {
+      if (profile.role !== "admin") {
+        return Response.json({ detail: "Forbidden" }, { status: 403 });
+      }
+      return Response.json(
+        Object.values(PROFILES).map((item) => ({
+          id: item.id,
+          username: item.username,
+          role: item.role,
+        })),
+      );
+    }
     if (url.pathname === "/api/users/resolve") {
       const username = url.searchParams.get("username");
       const found = Object.values(PROFILES).find(
@@ -248,8 +260,27 @@ describe("notebook-mode Canvas administrators", () => {
     ).toBe(403);
   });
 
-  it("keeps Silicon Notebook administrators immutable and rejects self-modification", async () => {
+  it("keeps Silicon Notebook administrators immutable even before they visit Canvas and rejects self-modification", async () => {
     await req("/api/auth/me", "nb-admin-tok");
+
+    // Second Notebook admin has NEVER visited Canvas yet: pre-grant must still
+    // detect their live Notebook role via /api/admin/users and refuse with 409.
+    const immutableNeverVisited = await req(
+      "/api/admin/canvas-admins",
+      "nb-admin-tok",
+      {
+        method: "POST",
+        body: { username: "admin2" },
+      },
+    );
+    expect(immutableNeverVisited.status).toBe(409);
+    expect(await immutableNeverVisited.json()).toEqual({
+      error: "notebook-admin-immutable",
+    });
+    expect(
+      (await db.query("SELECT 1 FROM users WHERE id = 'nb-admin-2'")).rowCount,
+    ).toBe(0);
+
     await req("/api/auth/me", "nb-admin-2-tok");
 
     const own = await req(
@@ -275,22 +306,14 @@ describe("notebook-mode Canvas administrators", () => {
     expect(await immutable.json()).toEqual({
       error: "notebook-admin-immutable",
     });
-
-    const immutableByUsername = await req(
-      "/api/admin/canvas-admins",
-      "nb-admin-tok",
-      {
-        method: "POST",
-        body: { username: "admin2" },
-      },
-    );
-    expect(immutableByUsername.status).toBe(409);
-    expect(await immutableByUsername.json()).toEqual({
-      error: "notebook-admin-immutable",
-    });
   });
 
-  it("pre-grants Canvas admin by Silicon Notebook username before the user ever visits Canvas", async () => {
+  it("pre-grants Canvas admin by username and records first_seen_at on first sign-in without altering legacy users", async () => {
+    // Seed a legacy pre-008 user with unknown first_seen_at (preprovisioned=false).
+    await db.query(
+      "INSERT INTO users(id, display_name, first_seen_at, last_role, preprovisioned) VALUES ('u-alice', 'Alice', NULL, NULL, false)",
+    );
+
     const missing = await req("/api/admin/canvas-admins", "nb-admin-tok", {
       method: "POST",
       body: { username: "nobody" },
@@ -314,6 +337,14 @@ describe("notebook-mode Canvas administrators", () => {
       },
     });
 
+    const beforeVisit = await db.query(
+      "SELECT first_seen_at, preprovisioned FROM users WHERE id = 'u-bob'",
+    );
+    expect(beforeVisit.rows[0]).toEqual({
+      first_seen_at: null,
+      preprovisioned: true,
+    });
+
     // Analytics users list exposes notebookAdmin/canvasAdmin flags cleanly.
     const usersRes = await req("/api/admin/analytics/users", "nb-admin-tok");
     expect(usersRes.status).toBe(200);
@@ -328,7 +359,8 @@ describe("notebook-mode Canvas administrators", () => {
       }),
     );
 
-    // When Bob opens Canvas for the first time, he is immediately a Canvas admin.
+    // When Bob opens Canvas for the first time, he is immediately a Canvas admin
+    // and his first_seen_at is recorded while preprovisioned clears to false.
     const meBob = await req("/api/auth/me", "bob-tok");
     expect(meBob.status).toBe(200);
     expect((await meBob.json()).user).toMatchObject({
@@ -338,6 +370,40 @@ describe("notebook-mode Canvas administrators", () => {
       isAdmin: true,
       notebookAdmin: false,
       canvasAdmin: true,
+    });
+    const afterVisit = await db.query(
+      "SELECT first_seen_at, preprovisioned FROM users WHERE id = 'u-bob'",
+    );
+    expect(afterVisit.rows[0].first_seen_at).toBeInstanceOf(Date);
+    expect(afterVisit.rows[0].preprovisioned).toBe(false);
+
+    // Legacy user Alice keeps first_seen_at = NULL after signing in.
+    expect((await req("/api/auth/me", "alice-tok")).status).toBe(200);
+    const legacyRow = await db.query(
+      "SELECT first_seen_at, preprovisioned FROM users WHERE id = 'u-alice'",
+    );
+    expect(legacyRow.rows[0]).toEqual({
+      first_seen_at: null,
+      preprovisioned: false,
+    });
+  });
+
+  it("handles concurrent pre-grant and first sign-in without duplicate-key errors", async () => {
+    const [grantRes, meRes] = await Promise.all([
+      req("/api/admin/canvas-admins", "nb-admin-tok", {
+        method: "POST",
+        body: { username: "bob" },
+      }),
+      req("/api/auth/me", "bob-tok"),
+    ]);
+    expect(grantRes.status).toBe(200);
+    expect(meRes.status).toBe(200);
+    const after = await req("/api/auth/me", "bob-tok");
+    expect((await after.json()).user).toMatchObject({
+      id: "u-bob",
+      isAdmin: true,
+      canvasAdmin: true,
+      notebookAdmin: false,
     });
   });
 });

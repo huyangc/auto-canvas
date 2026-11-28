@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { CircuitProject } from "@icm/model";
 import { serializeProject } from "@icm/project-protocol";
 import { ApiImage } from "../components/api-image";
@@ -79,6 +85,162 @@ function extractBatchProjectName(
   return (stem || "Untitled").slice(0, 120);
 }
 
+interface BatchUploadFailure {
+  fileName: string;
+  reason: string;
+}
+
+interface BatchUploadState {
+  running: boolean;
+  current: number;
+  total: number;
+  summary: string | null;
+  failures: BatchUploadFailure[];
+  completedSeq: number;
+}
+
+const EMPTY_BATCH_STATE: BatchUploadState = {
+  running: false,
+  current: 0,
+  total: 0,
+  summary: null,
+  failures: [],
+  completedSeq: 0,
+};
+
+// Module-level in-memory store (no browser storage) so batch upload progress
+// and final reports survive dialog closes and tab switches within the session.
+const batchStates = new Map<string, BatchUploadState>();
+const batchCancelled = new Set<string>();
+const batchListeners = new Set<() => void>();
+let batchCompletedCounter = 0;
+
+function emitBatchChange(): void {
+  for (const listener of batchListeners) listener();
+}
+
+function subscribeBatchStore(listener: () => void): () => void {
+  batchListeners.add(listener);
+  return () => {
+    batchListeners.delete(listener);
+  };
+}
+
+function getBatchState(key: string): BatchUploadState {
+  if (!key) return EMPTY_BATCH_STATE;
+  return batchStates.get(key) ?? EMPTY_BATCH_STATE;
+}
+
+function clearBatchReport(key: string): void {
+  const existing = batchStates.get(key);
+  if (!existing || existing.running) return;
+  batchStates.delete(key);
+  emitBatchChange();
+}
+
+function cancelBatchUpload(key: string): void {
+  if (!batchStates.get(key)?.running) return;
+  batchCancelled.add(key);
+  emitBatchChange();
+}
+
+async function runBatchUpload(params: {
+  key: string;
+  targetNotebookId: string | null;
+  targetGroupId: string | null;
+  scopeLabel: string;
+  files: File[];
+}): Promise<void> {
+  const { key, targetNotebookId, targetGroupId, scopeLabel, files } = params;
+  if (batchStates.get(key)?.running) return;
+  batchCancelled.delete(key);
+  batchStates.set(key, {
+    running: true,
+    current: 0,
+    total: files.length,
+    summary: null,
+    failures: [],
+    completedSeq: batchStates.get(key)?.completedSeq ?? 0,
+  });
+  emitBatchChange();
+
+  let approvedCount = 0;
+  let pendingCount = 0;
+  let cancelledCount = 0;
+  const failures: BatchUploadFailure[] = [];
+
+  for (let index = 0; index < files.length; index++) {
+    if (batchCancelled.has(key)) {
+      cancelledCount = files.length - index;
+      break;
+    }
+    const file = files[index]!;
+    const prev = batchStates.get(key) ?? EMPTY_BATCH_STATE;
+    batchStates.set(key, {
+      ...prev,
+      running: true,
+      current: index + 1,
+      total: files.length,
+    });
+    emitBatchChange();
+    try {
+      const projectText = await file.text();
+      const name = extractBatchProjectName(file.name, projectText);
+      const payload = { name, description: "", projectText };
+      const created = targetNotebookId
+        ? await submitNotebookProject(targetNotebookId, payload)
+        : await submitGroupProject(targetGroupId!, payload);
+      if (created.status === "approved") approvedCount += 1;
+      else pendingCount += 1;
+    } catch (err) {
+      failures.push({
+        fileName: file.name,
+        reason: err instanceof Error ? err.message : "上传失败",
+      });
+    }
+  }
+
+  batchCancelled.delete(key);
+  const succeeded = approvedCount + pendingCount;
+  const summaryParts: string[] = [];
+  if (succeeded > 0) {
+    const detailParts: string[] = [];
+    if (approvedCount > 0) detailParts.push(`${approvedCount} 个已入库`);
+    if (pendingCount > 0) detailParts.push(`${pendingCount} 个待审核`);
+    summaryParts.push(`成功 ${succeeded} 个（${detailParts.join("，")}）`);
+  }
+  if (failures.length > 0) summaryParts.push(`失败 ${failures.length} 个`);
+  if (cancelledCount > 0) summaryParts.push(`已取消剩余 ${cancelledCount} 个`);
+
+  const summary =
+    summaryParts.length > 0
+      ? `批量上传到「${scopeLabel}」${cancelledCount > 0 ? "已停止" : "完成"}：${summaryParts.join("，")}。`
+      : null;
+
+  const nextCompletedSeq =
+    succeeded > 0
+      ? ++batchCompletedCounter
+      : (batchStates.get(key)?.completedSeq ?? 0);
+
+  batchStates.set(key, {
+    running: false,
+    current: 0,
+    total: 0,
+    summary,
+    failures,
+    completedSeq: nextCompletedSeq,
+  });
+  emitBatchChange();
+}
+
+/** Test-only reset to keep unit tests isolated. */
+export function resetBatchUploadStateForTests(): void {
+  batchStates.clear();
+  batchCancelled.clear();
+  batchCompletedCounter = 0;
+  emitBatchChange();
+}
+
 export function GroupProjectsPanel({
   currentProject,
   groupVisibility = "all",
@@ -114,14 +276,6 @@ export function GroupProjectsPanel({
   );
   const [submitDesc, setSubmitDesc] = useState("");
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
-  const [batchProgress, setBatchProgress] = useState<{
-    current: number;
-    total: number;
-  } | null>(null);
-  const [batchReport, setBatchReport] = useState<{
-    summary: string | null;
-    failures: { fileName: string; reason: string }[];
-  } | null>(null);
   const batchInputRef = useRef<HTMLInputElement | null>(null);
   const listRequestSeq = useRef(0);
   const selectedGroupIdRef = useRef(selectedGroupId);
@@ -136,6 +290,20 @@ export function GroupProjectsPanel({
   const targetName = isNotebookScope
     ? (notebookSpace?.name ?? notebookName ?? "当前笔记本")
     : (selectedGroup?.name ?? "");
+  const batchKey = isNotebookScope
+    ? notebookId
+      ? `notebook:${notebookId}`
+      : ""
+    : selectedGroup
+      ? `group:${selectedGroup.id}`
+      : "";
+  const batchState = useSyncExternalStore(
+    subscribeBatchStore,
+    () => getBatchState(batchKey),
+    () => EMPTY_BATCH_STATE,
+  );
+  const isBusy = busyId !== null || batchState.running;
+  const lastSeenBatchSeq = useRef(batchState.completedSeq);
 
   const refreshGroups = useCallback(async () => {
     if (isNotebookScope) {
@@ -257,6 +425,16 @@ export function GroupProjectsPanel({
     if (!canAdmin && filter === "pending") setFilter("approved");
   }, [canAdmin, filter]);
 
+  useEffect(() => {
+    if (batchState.completedSeq !== lastSeenBatchSeq.current) {
+      lastSeenBatchSeq.current = batchState.completedSeq;
+      if (batchState.completedSeq > 0) {
+        setReloadTick((v) => v + 1);
+        void refreshGroups();
+      }
+    }
+  }, [batchState.completedSeq, refreshGroups]);
+
   const handleOpen = async (item: GroupProjectSummary) => {
     setBusyId(item.id);
     setError(null);
@@ -309,63 +487,23 @@ export function GroupProjectsPanel({
     }
   };
 
-  const handleBatchUpload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
+  const handleBatchUpload = (files: FileList | null) => {
+    if (!files || files.length === 0 || !batchKey) return;
     const selectedFiles = Array.from(files);
     if (batchInputRef.current) batchInputRef.current.value = "";
     const targetNotebookId = isNotebookScope ? (notebookId ?? null) : null;
     const targetGroupId = !isNotebookScope ? (selectedGroup?.id ?? null) : null;
     if (!targetNotebookId && !targetGroupId) return;
     const scopeLabel = targetName || "当前电路库";
-
-    setBusyId("batch");
-    setBatchProgress({ current: 0, total: selectedFiles.length });
-    setBatchReport(null);
     setError(null);
     setNotice(null);
-
-    let approvedCount = 0;
-    let pendingCount = 0;
-    const failures: { fileName: string; reason: string }[] = [];
-
-    try {
-      for (let index = 0; index < selectedFiles.length; index++) {
-        const file = selectedFiles[index]!;
-        setBatchProgress({ current: index + 1, total: selectedFiles.length });
-        try {
-          const projectText = await file.text();
-          const name = extractBatchProjectName(file.name, projectText);
-          const payload = { name, description: "", projectText };
-          const created = targetNotebookId
-            ? await submitNotebookProject(targetNotebookId, payload)
-            : await submitGroupProject(targetGroupId!, payload);
-          if (created.status === "approved") approvedCount += 1;
-          else pendingCount += 1;
-        } catch (err) {
-          failures.push({
-            fileName: file.name,
-            reason: err instanceof Error ? err.message : "上传失败",
-          });
-        }
-      }
-
-      const succeeded = approvedCount + pendingCount;
-      let summary: string | null = null;
-      if (succeeded > 0) {
-        const detailParts: string[] = [];
-        if (approvedCount > 0) detailParts.push(`${approvedCount} 个已入库`);
-        if (pendingCount > 0) detailParts.push(`${pendingCount} 个待审核`);
-        summary = `批量上传到「${scopeLabel}」完成：成功 ${succeeded} 个（${detailParts.join("，")}）${failures.length > 0 ? `，失败 ${failures.length} 个` : ""}。`;
-        setReloadTick((v) => v + 1);
-        await refreshGroups();
-      }
-      if (summary || failures.length > 0) {
-        setBatchReport({ summary, failures });
-      }
-    } finally {
-      setBatchProgress(null);
-      setBusyId(null);
-    }
+    void runBatchUpload({
+      key: batchKey,
+      targetNotebookId,
+      targetGroupId,
+      scopeLabel,
+      files: selectedFiles,
+    });
   };
 
   const handleReview = async (
@@ -467,7 +605,6 @@ export function GroupProjectsPanel({
                 const next = event.target.value;
                 setSelectedGroupId(next);
                 onSelectGroup?.(next);
-                setBatchReport(null);
                 setNotice(null);
                 setError(null);
               }}
@@ -537,23 +674,32 @@ export function GroupProjectsPanel({
               accept=".json,.icproj.json"
               aria-label="选择批量上传电路文件"
               style={{ display: "none" }}
-              onChange={(event) => void handleBatchUpload(event.target.files)}
+              onChange={(event) => handleBatchUpload(event.target.files)}
             />
             <button
               type="button"
               className="group-lib-btn"
-              disabled={busyId !== null}
+              disabled={isBusy}
               onClick={() => batchInputRef.current?.click()}
             >
-              {batchProgress
-                ? `批量上传中 (${batchProgress.current}/${batchProgress.total})…`
+              {batchState.running
+                ? `批量上传中 (${batchState.current}/${batchState.total})…`
                 : "批量上传文件…"}
             </button>
+            {batchState.running ? (
+              <button
+                type="button"
+                className="group-lib-btn group-lib-btn-danger"
+                onClick={() => cancelBatchUpload(batchKey)}
+              >
+                停止剩余上传
+              </button>
+            ) : null}
             {currentProject ? (
               <button
                 type="button"
                 className="group-lib-btn group-lib-btn-primary"
-                disabled={busyId === "batch"}
+                disabled={batchState.running}
                 onClick={() => {
                   setSubmitName(currentProject.name.trim() || "");
                   setSubmitOpen((open) => !open);
@@ -610,15 +756,28 @@ export function GroupProjectsPanel({
         </div>
       ) : null}
 
-      {batchReport?.summary ? (
+      {batchState.running ? (
         <div className="group-lib-notice" role="status">
-          {batchReport.summary}
+          正在批量上传电路文件（{batchState.current} / {batchState.total}
+          ），切换标签页或关闭弹窗不会中断，重新打开后可继续查看进度与结果。
         </div>
       ) : null}
-      {batchReport && batchReport.failures.length > 0 ? (
+      {!batchState.running && batchState.summary ? (
+        <div className="group-lib-notice group-lib-notice-row" role="status">
+          <span>{batchState.summary}</span>
+          <button
+            type="button"
+            className="group-lib-btn"
+            onClick={() => clearBatchReport(batchKey)}
+          >
+            关闭
+          </button>
+        </div>
+      ) : null}
+      {!batchState.running && batchState.failures.length > 0 ? (
         <div className="group-lib-error" role="alert">
-          以下 {batchReport.failures.length} 个文件上传失败：
-          {batchReport.failures
+          以下 {batchState.failures.length} 个文件上传失败：
+          {batchState.failures
             .map((item) => `${item.fileName}（${item.reason}）`)
             .join("；")}
         </div>

@@ -19,6 +19,12 @@ interface ResolvedNotebookUser {
   displayName: string;
 }
 
+interface NotebookAdminDirectoryUser {
+  id: string;
+  username: string;
+  role: string;
+}
+
 type ResolveUserResult =
   | { ok: true; user: ResolvedNotebookUser }
   | {
@@ -27,9 +33,18 @@ type ResolveUserResult =
       error: "unauthorized" | "user-not-found" | "notebook-unavailable";
     };
 
+type DirectoryResult =
+  | { ok: true; usersById: Map<string, NotebookAdminDirectoryUser> }
+  | {
+      ok: false;
+      status: 401 | 403 | 503;
+      error: "unauthorized" | "forbidden" | "notebook-unavailable";
+    };
+
 /** Serialises Canvas-admin mutations in notebook mode; 1–3 are taken by standalone accounts. */
 const ADMINISTRATION_LOCK = "SELECT pg_advisory_xact_lock(4310, 4)";
 const MAX_BODY_BYTES = 64 * 1024;
+const MAX_DIRECTORY_BYTES = 2 * 1024 * 1024;
 const MAX_ID_LENGTH = 200;
 const MAX_DISPLAY_NAME_LENGTH = 80;
 const MAX_USERNAME_LENGTH = 128;
@@ -75,6 +90,36 @@ function parseResolvedUser(
     username,
     displayName: sanitizeDisplayName(rawDisplayName, username || id),
   };
+}
+
+function parseAdminDirectory(
+  text: string,
+): Map<string, NotebookAdminDirectoryUser> | null {
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(body)) return null;
+  const usersById = new Map<string, NotebookAdminDirectoryUser>();
+  for (const item of body) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+    const record = item as Record<string, unknown>;
+    const id = record.id;
+    const username = record.username;
+    const role = record.role;
+    if (
+      typeof id !== "string" ||
+      !id ||
+      typeof username !== "string" ||
+      typeof role !== "string"
+    ) {
+      return null;
+    }
+    usersById.set(id, { id, username, role });
+  }
+  return usersById;
 }
 
 /**
@@ -160,6 +205,62 @@ export function registerNotebookAdmins(
     }
   }
 
+  /**
+   * Queries silicon-notebook's role-bearing `GET /api/admin/users` directory
+   * with the caller's Notebook-admin bearer token so Canvas never mutates a
+   * current Silicon Notebook administrator (even one who has never opened
+   * Canvas or was just promoted in silicon-notebook).
+   */
+  async function fetchNotebookAdminDirectory(
+    token: string,
+  ): Promise<DirectoryResult> {
+    const endpoint = new URL("/api/admin/users", notebookApi);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      let response: Response;
+      try {
+        response = await send(endpoint, {
+          headers: { Authorization: `Bearer ${token}` },
+          redirect: "manual",
+          signal: controller.signal,
+        });
+      } catch {
+        return { ok: false, status: 503, error: "notebook-unavailable" };
+      }
+      if (response.status === 401) {
+        void response.body?.cancel().catch(() => undefined);
+        return { ok: false, status: 401, error: "unauthorized" };
+      }
+      if (response.status === 403) {
+        void response.body?.cancel().catch(() => undefined);
+        return { ok: false, status: 403, error: "forbidden" };
+      }
+      if (response.status !== 200) {
+        void response.body?.cancel().catch(() => undefined);
+        return { ok: false, status: 503, error: "notebook-unavailable" };
+      }
+      let text: string;
+      try {
+        text = await readNotebookCapped(
+          response,
+          controller.signal,
+          MAX_DIRECTORY_BYTES,
+        );
+      } catch {
+        void response.body?.cancel().catch(() => undefined);
+        return { ok: false, status: 503, error: "notebook-unavailable" };
+      }
+      const usersById = parseAdminDirectory(text);
+      if (!usersById)
+        return { ok: false, status: 503, error: "notebook-unavailable" };
+      return { ok: true, usersById };
+    } finally {
+      clearTimeout(timer);
+      controller.abort();
+    }
+  }
+
   app.patch("/api/admin/canvas-admins/:id", limited, async (c) => {
     const denied = requireNotebookAdmin(c);
     if (denied) return denied;
@@ -178,6 +279,16 @@ export function registerNotebookAdmins(
     }
     if (targetId === c.get("sessionUser").id)
       return c.json({ error: "own-account" }, 409);
+
+    const token = parseBearer(c.req.header("authorization") ?? null);
+    if (!token) return c.json({ error: "unauthorized" }, 401);
+
+    const directory = await fetchNotebookAdminDirectory(token);
+    if (!directory.ok)
+      return c.json({ error: directory.error }, directory.status);
+    const liveUser = directory.usersById.get(targetId);
+    if (liveUser?.role === "admin")
+      return c.json({ error: "notebook-admin-immutable" }, 409);
 
     const nextCanvasAdmin = body.canvasAdmin;
     const conn = await db.connect();
@@ -202,14 +313,14 @@ export function registerNotebookAdmins(
         await conn.query("ROLLBACK");
         return c.json({ error: "not-found" }, 404);
       }
-      if (target.last_role === "admin") {
+      if (!liveUser && target.last_role === "admin") {
         await conn.query("ROLLBACK");
         return c.json({ error: "notebook-admin-immutable" }, 409);
       }
-      await conn.query("UPDATE users SET canvas_admin = $2 WHERE id = $1", [
-        target.id,
-        nextCanvasAdmin,
-      ]);
+      await conn.query(
+        "UPDATE users SET canvas_admin = $2, last_role = CASE WHEN $3::text IS NOT NULL THEN $3 ELSE last_role END WHERE id = $1",
+        [target.id, nextCanvasAdmin, liveUser ? "user" : null],
+      );
       await conn.query("COMMIT");
       return c.json({
         user: {
@@ -252,10 +363,20 @@ export function registerNotebookAdmins(
     const token = parseBearer(c.req.header("authorization") ?? null);
     if (!token) return c.json({ error: "unauthorized" }, 401);
 
-    const resolved = await resolveUserByUsername(token, username);
+    const [resolved, directory] = await Promise.all([
+      resolveUserByUsername(token, username),
+      fetchNotebookAdminDirectory(token),
+    ]);
     if (!resolved.ok) return c.json({ error: resolved.error }, resolved.status);
+    if (!directory.ok)
+      return c.json({ error: directory.error }, directory.status);
     if (resolved.user.id === c.get("sessionUser").id)
       return c.json({ error: "own-account" }, 409);
+
+    const liveUser = directory.usersById.get(resolved.user.id);
+    if (!liveUser) return c.json({ error: "user-not-found" }, 404);
+    if (liveUser.role === "admin")
+      return c.json({ error: "notebook-admin-immutable" }, 409);
 
     const conn = await db.connect();
     try {
@@ -269,48 +390,37 @@ export function registerNotebookAdmins(
         await conn.query("ROLLBACK");
         return c.json({ error: "not-found" }, 404);
       }
-      const existing = await conn.query<{
+      // Single atomic conflict-safe upsert: safe under concurrent first sign-in
+      // from `onProfile`, never sets `canvas_admin` on a Notebook admin row, and
+      // marks newly pre-provisioned rows so `onProfile` records `first_seen_at`
+      // on their first real visit without affecting legacy null-first-seen rows.
+      const { rows } = await conn.query<{
         id: string;
         display_name: string;
-        last_role: string | null;
       }>(
-        "SELECT id, display_name, last_role FROM users WHERE id = $1 FOR UPDATE",
-        [resolved.user.id],
-      );
-      const row = existing.rows[0];
-      if (row) {
-        if (row.last_role === "admin") {
-          await conn.query("ROLLBACK");
-          return c.json({ error: "notebook-admin-immutable" }, 409);
-        }
-        const displayName =
-          row.display_name.trim() || resolved.user.displayName;
-        await conn.query(
-          "UPDATE users SET canvas_admin = true, display_name = $2 WHERE id = $1",
-          [row.id, displayName],
-        );
-        await conn.query("COMMIT");
-        return c.json({
-          user: {
-            id: row.id,
-            username: resolved.user.username,
-            displayName,
-            role: "admin",
-            notebookAdmin: false,
-            canvasAdmin: true,
-          },
-        });
-      }
-      await conn.query(
-        "INSERT INTO users(id, display_name, last_role, canvas_admin, first_seen_at) VALUES ($1, $2, 'user', true, NULL)",
+        `INSERT INTO users(id, display_name, last_role, canvas_admin, first_seen_at, preprovisioned)
+         VALUES ($1, $2, 'user', true, NULL, true)
+         ON CONFLICT (id) DO UPDATE
+           SET canvas_admin = true,
+               display_name = CASE
+                 WHEN btrim(users.display_name) = '' THEN EXCLUDED.display_name
+                 ELSE users.display_name
+               END
+           WHERE coalesce(users.last_role, 'user') <> 'admin'
+         RETURNING id, display_name`,
         [resolved.user.id, resolved.user.displayName],
       );
+      const upserted = rows[0];
+      if (!upserted) {
+        await conn.query("ROLLBACK");
+        return c.json({ error: "notebook-admin-immutable" }, 409);
+      }
       await conn.query("COMMIT");
       return c.json({
         user: {
-          id: resolved.user.id,
+          id: upserted.id,
           username: resolved.user.username,
-          displayName: resolved.user.displayName,
+          displayName: upserted.display_name,
           role: "admin",
           notebookAdmin: false,
           canvasAdmin: true,

@@ -2,7 +2,10 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GroupProjectsPanel } from "./group-projects-panel";
+import {
+  GroupProjectsPanel,
+  resetBatchUploadStateForTests,
+} from "./group-projects-panel";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -47,6 +50,7 @@ let root: Root | undefined;
 afterEach(async () => {
   await act(async () => root?.unmount());
   root = undefined;
+  resetBatchUploadStateForTests();
   document.body.innerHTML = "";
   vi.unstubAllGlobals();
 });
@@ -246,6 +250,25 @@ describe("GroupProjectsPanel", () => {
       "broken",
       "LDO_Regulator",
     ]);
+    expect(host.querySelector('[role="status"]')?.textContent).toContain(
+      "成功 2 个（2 个已入库），失败 1 个",
+    );
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+      "broken.icproj.json",
+    );
+
+    // Unmounting and remounting (e.g., closing the dialog and reopening) keeps
+    // the batch upload report visible until dismissed.
+    await act(async () => root!.unmount());
+    root = createRoot(host);
+    await act(async () =>
+      root!.render(
+        <GroupProjectsPanel
+          groupVisibility="public"
+          onOpenGroupProject={vi.fn()}
+        />,
+      ),
+    );
     expect(host.querySelector('[role="status"]')?.textContent).toContain(
       "成功 2 个（2 个已入库），失败 1 个",
     );
