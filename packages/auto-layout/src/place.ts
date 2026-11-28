@@ -78,6 +78,7 @@ import {
   skeletonStageSeed,
   solveSkeletonSaDraft,
 } from "./skeleton-sa.js";
+import { solvePassiveSkeletonDraft } from "./passive-skeleton.js";
 import { solveMctsDraft } from "./mcts-placement.js";
 import { solveConventionDraft } from "./convention-solver.js";
 import type {
@@ -498,6 +499,41 @@ export function placeDocument(
     targets = structuredClone(draft.placements);
     // R168 chose every pose; R21 leaves them alone.
     oriented = new Set(targets.keys());
+  } else if (strategy === "passive-skeleton") {
+    const draft = planningMemo(
+      document,
+      resolver,
+      JSON.stringify([
+        strategy,
+        roles.pitch,
+        roles.unsplitSymmetry,
+        roles.mirrorSymmetry,
+        roles.symmetricHalfOrder,
+        roles.seriesLevels,
+        roles.signalSeries,
+      ]),
+      () => {
+        try {
+          return solvePassiveSkeletonDraft(
+            document,
+            resolver,
+            roles,
+            templates,
+            topology,
+            options,
+          );
+        } catch {
+          return { problem: "R176: draft failed", placements: undefined };
+        }
+      },
+    );
+    if (!draft.placements || devices.some((i) => !draft.placements!.has(i.id)))
+      return {
+        placements: targets,
+        problem: draft.problem ?? "R176: incomplete draft",
+      };
+    targets = structuredClone(draft.placements);
+    oriented = new Set(targets.keys());
   } else if (strategy === "mcts" || strategy === "skeleton-sa") {
     const skeleton = strategy === "skeleton-sa";
     const rule = skeleton ? "R174" : "R171";
@@ -706,7 +742,7 @@ export function placeDocument(
     seatedContacts,
   );
   if (deviceCollision) return { placements: targets, problem: deviceCollision };
-  if (!given)
+  if (!given && strategy !== "passive-skeleton")
     for (const local of partitionDocuments(
       { ...document, instances: devices },
       partition,
@@ -762,7 +798,7 @@ export function placeDocument(
   );
   if (attachedCollision)
     return { placements: targets, problem: attachedCollision };
-  if (!given)
+  if (!given && strategy !== "passive-skeleton")
     for (const local of partitionDocuments(
       { ...document, instances: devices },
       partition,
@@ -906,6 +942,26 @@ export function placeDocument(
     seatedContacts,
   );
   if (collision) return { placements: targets, problem: collision };
+  if (strategy === "passive-skeleton") {
+    const components = symmetry.length
+      ? symmetry
+      : mirrorSymmetryTopology(document, resolver, roles).components;
+    const c = symmetryCounts(
+      withPlacements(document, targets),
+      resolver,
+      components,
+    );
+    if (
+      c.mirrored !== c.pairs ||
+      c.level !== c.pairs ||
+      c.orientationMirrored !== c.pairs ||
+      c.onAxis !== c.axisDevices
+    )
+      return {
+        placements: targets,
+        problem: "R176: draft breaks recognized symmetry",
+      };
+  }
   const oldBox = searchLimit?.anchor ?? enclosingBox(document, resolver);
   const newBox = enclosingBox(withPlacements(document, targets), resolver);
   const snap = (n: number) =>

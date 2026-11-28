@@ -881,6 +881,15 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   and the rigid block are unchanged. It is an additional finished finalist
   after `gateRow` (fixed order), admitted by the T078 margin rule and decided
   by the finished comparator.
+- **R176 — Active-skeleton / passive-module decoupling draft (T206).** With
+  positive search evaluations or optimized quality, a transistor drawing of up
+  to 120 instances can place its active core first. Series/parallel two-port
+  passive bridges and rail attachments occupy bounded local grid slots around
+  core pins. Recognized symmetry, locked owners, coupling, and hierarchy
+  constrain eligibility. The draft preserves electrical nets and competes
+  after finishing and label placement. Selection protects routing safety,
+  physical completeness, readability and visual guards. At equal completeness
+  the crossing count may only stay level or fall.
 - **R161 — Drawn frame interfaces (T122).** A drawn rectangle is a functional
   frame when open wire ends (a junction touched by exactly one Route) of at
   least two distinct terminal Nets lie on its edges; two Nets on the same edge
