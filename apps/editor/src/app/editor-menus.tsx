@@ -40,7 +40,10 @@ import {
   type EditorServices,
 } from "../services/editor-services";
 import { EditorAppChrome } from "./editor-app-chrome";
-import type { HeaderNotebookUser } from "../accounts/header-account-menu";
+import type {
+  HeaderCloudProjectsScope,
+  HeaderNotebookUser,
+} from "../accounts/header-account-menu";
 import type { EditorProjectPanelMode } from "./editor-project-dock";
 import type { createEditorTransactionCommands } from "./editor-transaction-commands";
 import type { useProjectCheck } from "./use-project-check";
@@ -85,7 +88,7 @@ export function EditorMenuBar({
   documentSettingsOpen,
   setDocumentSettingsOpen,
   setProjectInfoOpen,
-  setCloudProjectsOpen,
+  openCloudProjects,
   projectNameEditing,
   cloudManagementBusy,
   closingSaveBusy,
@@ -158,7 +161,7 @@ export function EditorMenuBar({
   documentSettingsOpen: boolean;
   setDocumentSettingsOpen: Dispatch<SetStateAction<boolean>>;
   setProjectInfoOpen: Dispatch<SetStateAction<boolean>>;
-  setCloudProjectsOpen: Dispatch<SetStateAction<boolean>>;
+  openCloudProjects: (scope?: HeaderCloudProjectsScope) => void;
   projectNameEditing: RefObject<boolean>;
   cloudManagementBusy: ProjectTabSessions["cloudManagementBusy"];
   closingSaveBusy: ProjectTabSessions["closingSaveBusy"];
@@ -247,7 +250,8 @@ export function EditorMenuBar({
     busy: projectTabs.busy || cloudManagementBusy || closingSaveBusy,
     onNew: () => void projectTabs.open(() => createNewTabSession()),
     onOpenFile: () => tabProjectInputRef.current?.click(),
-    onOpenCloudProjects: () => setCloudProjectsOpen(true),
+    onOpenCloudProjects: (scope?: HeaderCloudProjectsScope) =>
+      openCloudProjects(scope),
     onClose: (trigger: HTMLElement | null) => closeActiveTab.current?.(trigger),
   };
   return (
@@ -276,7 +280,7 @@ export function EditorMenuBar({
             onSaveAndClose={saveAndCloseTabs}
             onNew={tabActions.onNew}
             onOpenFile={tabActions.onOpenFile}
-            onOpenCloudProjects={tabActions.onOpenCloudProjects}
+            onOpenCloudProjects={() => tabActions.onOpenCloudProjects()}
           />
           <input
             ref={tabProjectInputRef}

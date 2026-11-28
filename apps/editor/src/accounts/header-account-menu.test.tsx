@@ -248,28 +248,56 @@ describe("HeaderAccountMenu", () => {
     }
   });
 
-  it("renders the Silicon Notebook user menu with a back-to-notebook control", () => {
-    const markup = renderToStaticMarkup(
-      <HeaderAccountMenu
-        cloudProjects={library()}
-        notebookUser={{
-          id: "u1",
-          displayName: "Alice Lin",
-          isAdmin: false,
-          backHref: "/#groups&group=grp-1",
-          backLabel: "返回 Silicon Notebook 群组",
-        }}
-      />,
+  it("renders the Silicon Notebook user menu with personal/group/public circuit libraries and back-to-notebook control", async () => {
+    const projects = library();
+    const host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () =>
+      root!.render(
+        <HeaderAccountMenu
+          cloudProjects={projects}
+          notebookUser={{
+            id: "u1",
+            displayName: "Alice Lin",
+            isAdmin: false,
+            backHref: "/#groups&group=grp-1",
+            backLabel: "返回 Silicon Notebook 群组",
+          }}
+        />,
+      ),
     );
+    const markup = host.innerHTML;
     expect(markup).toContain('data-testid="header-account-menu"');
     expect(markup).toContain('data-initial="A"');
     expect(markup).toContain("<strong>Alice Lin</strong>");
     expect(markup).toContain("Silicon Notebook");
-    expect(markup).toContain("My Cloud Projects");
+    expect(markup).not.toContain("My Cloud Projects");
+    expect(markup).toContain("我的电路库");
+    expect(markup).toContain("群组电路库");
+    expect(markup).toContain("公共电路库");
     expect(markup).toContain('data-testid="back-to-notebook"');
     expect(markup).toContain("返回 Silicon Notebook 群组");
     expect(markup).not.toContain('data-testid="open-analytics"');
     expect(markup).not.toContain('data-testid="sign-out"');
+
+    const menu = host.querySelector<HTMLDetailsElement>(
+      '[data-testid="header-account-menu"]',
+    )!;
+    for (const [testId, expectedScope] of [
+      ["account-menu-personal-projects", "personal"],
+      ["account-menu-group-projects", "groups"],
+      ["account-menu-public-projects", "public"],
+    ] as const) {
+      menu.open = true;
+      await act(async () =>
+        host
+          .querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)!
+          .click(),
+      );
+      expect(projects.onOpenDialog).toHaveBeenLastCalledWith(expectedScope);
+      expect(menu.open).toBe(false);
+    }
   });
 
   it("opens analytics inside the Silicon Notebook user menu for admins and closes the menu", async () => {

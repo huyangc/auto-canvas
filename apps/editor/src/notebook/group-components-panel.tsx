@@ -426,6 +426,7 @@ export function GroupComponentsPanel({
               {groups.map((group) => (
                 <option key={group.id} value={group.id}>
                   {group.name}
+                  {group.isPublic ? "（公共）" : ""}
                   {group.isAdmin && (group.pendingComponentCount ?? 0) > 0
                     ? `（待审 ${group.pendingComponentCount}）`
                     : ""}

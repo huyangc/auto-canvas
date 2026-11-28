@@ -4,10 +4,14 @@ import { useCloudAutoSavePreference } from "../document/cloud-auto-save";
 import { appUrl } from "../lib/app-url";
 import { AccountContext } from "./account-context";
 
+/** Scope tab to focus when opening the Cloud Projects / Circuit Library modal. */
+export type HeaderCloudProjectsScope =
+  "personal" | "notebook" | "groups" | "public";
+
 /** Opens the Cloud Projects modal from the signed-in account menu. */
 export interface HeaderAccountCloudProjects {
   busy: boolean;
-  onOpenDialog(): void;
+  onOpenDialog(scope?: HeaderCloudProjectsScope): void;
 }
 
 /** Signed-in silicon-notebook identity shown in the notebook build's top bar. */
@@ -91,17 +95,58 @@ export function HeaderAccountMenu({
         <div className="command-separator" role="separator" />
         {cloudProjects ? (
           <>
-            <button
-              type="button"
-              aria-haspopup="dialog"
-              disabled={cloudProjects.busy}
-              onClick={() => {
-                if (menu.current) menu.current.open = false;
-                cloudProjects.onOpenDialog();
-              }}
-            >
-              My Cloud Projects
-            </button>
+            {notebookUser && !account ? (
+              <>
+                <button
+                  type="button"
+                  aria-haspopup="dialog"
+                  data-testid="account-menu-personal-projects"
+                  disabled={cloudProjects.busy}
+                  onClick={() => {
+                    if (menu.current) menu.current.open = false;
+                    cloudProjects.onOpenDialog("personal");
+                  }}
+                >
+                  我的电路库
+                </button>
+                <button
+                  type="button"
+                  aria-haspopup="dialog"
+                  data-testid="account-menu-group-projects"
+                  disabled={cloudProjects.busy}
+                  onClick={() => {
+                    if (menu.current) menu.current.open = false;
+                    cloudProjects.onOpenDialog("groups");
+                  }}
+                >
+                  群组电路库
+                </button>
+                <button
+                  type="button"
+                  aria-haspopup="dialog"
+                  data-testid="account-menu-public-projects"
+                  disabled={cloudProjects.busy}
+                  onClick={() => {
+                    if (menu.current) menu.current.open = false;
+                    cloudProjects.onOpenDialog("public");
+                  }}
+                >
+                  公共电路库
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                aria-haspopup="dialog"
+                disabled={cloudProjects.busy}
+                onClick={() => {
+                  if (menu.current) menu.current.open = false;
+                  cloudProjects.onOpenDialog();
+                }}
+              >
+                My Cloud Projects
+              </button>
+            )}
             <div className="command-separator" role="separator" />
           </>
         ) : null}
