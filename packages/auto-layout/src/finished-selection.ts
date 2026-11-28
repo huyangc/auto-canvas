@@ -2,6 +2,7 @@ import { diagnoseLabelClearance } from "@icm/derived";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { planningMemo } from "./planning-reuse.js";
+import { splitsRigidUnit } from "./device-relocation-search.js";
 import { emptyChoices } from "./layout-choices.js";
 import { readabilityTerm } from "./readability-selection.js";
 import { readabilityMetrics } from "./readability-metrics.js";
@@ -14,13 +15,18 @@ import {
   type LayoutRun,
 } from "./refine.js";
 import { routedGuards } from "./routed-search-score.js";
-import { auditRouting } from "./routing-audit.js";
+import {
+  auditRouting,
+  floatingPins,
+  missingConnections,
+} from "./routing-audit.js";
 import { preview } from "./transaction.js";
 import type { AutoLayoutResult, LayoutPartition } from "./types.js";
 
 type FinalistKind =
   | "runner"
   | "convention"
+  | "passiveSkeleton"
   | "mcts"
   | "skeletonSa"
   | "unsplitSymmetry"
@@ -177,6 +183,7 @@ export function rankedFinalists(pass: FinalistPass, resolver: SymbolResolver) {
       "attachment",
       "gateRow",
       "halfOrder",
+      "passiveSkeleton",
     ] as const
   ).filter((kind) => pass.available.has(kind));
 }
@@ -196,8 +203,37 @@ export function selectFinishedLayout(
   const before = preview(source, resolver, base.edits);
   const symmetryFinalist =
     kind === "unsplitSymmetry" || kind === "mirrorSymmetry";
-  if (!before.ok) return symmetryFinalist ? base : candidate;
-  if (!symmetryFinalist && base.diagnostics.some((d) => d.severity === "error"))
+  if (!before.ok)
+    return symmetryFinalist || kind === "passiveSkeleton" ? base : candidate;
+  if (kind === "passiveSkeleton") {
+    const rigidGroups = base.groups.map((g) => [
+      ...g.members,
+      ...(g.extraMemberIds ?? []),
+      ...(g.tailInstanceId ? [g.tailInstanceId] : []),
+    ]);
+    if (
+      before.document.instances.some((i) => !i.placement) ||
+      after.document.instances.some((i) => !i.placement) ||
+      splitsRigidUnit(before.document, after.document, rigidGroups)
+    )
+      return base;
+    const completeness = (d: SchematicDocument) =>
+      missingConnections(d, resolver) + floatingPins(d, resolver).length;
+    const delta = completeness(after.document) - completeness(before.document);
+    const first = auditRouting(before.document, resolver);
+    const second = auditRouting(after.document, resolver);
+    if (
+      delta > 0 ||
+      second.unsafeProblems.length > first.unsafeProblems.length ||
+      (delta === 0 && second.crossings > first.crossings)
+    )
+      return base;
+  }
+  if (
+    kind !== "passiveSkeleton" &&
+    !symmetryFinalist &&
+    base.diagnostics.some((d) => d.severity === "error")
+  )
     return candidate;
   const run = (result: AutoLayoutResult, final: SchematicDocument) => ({
     result,

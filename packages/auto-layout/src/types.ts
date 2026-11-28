@@ -9,6 +9,7 @@ export type LayoutStrategy =
   | "layered"
   | "stages"
   | "feedback-rows"
+  | "passive-skeleton"
   | "mcts"
   | "skeleton-sa"
   | "convention"

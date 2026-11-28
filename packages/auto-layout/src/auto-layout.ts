@@ -10,6 +10,7 @@ import {
 import { aprDetailPlace } from "./apr-detail-place.js";
 import { feedbackRowCircuit, hasTransistor } from "./feedback-rows.js";
 import { skeletonSaDraftEligible } from "./skeleton-sa.js";
+import { passiveSkeletonDraftEligible } from "./passive-skeleton.js";
 import { mctsDraftEligible } from "./mcts-placement.js";
 import { conventionDraftEligible } from "./convention-relations.js";
 import { netlistMirrorSeats } from "./netlist-mirror-seats.js";
@@ -225,6 +226,7 @@ export function defaultLayoutSearch(
 }
 
 interface LevelOptions extends AutoLayoutOptions {
+  passiveSkeletonAttempt?: { started: boolean };
   negotiated?: boolean;
   aprAttempt?: { started: boolean };
   pitch?: Readonly<PlacementPitch>;
@@ -379,6 +381,11 @@ export function planAutoLayout(
   const levelOptions: LevelOptions = {
     ...options,
     aprAttempt: { started: false },
+    ...(!options.partition &&
+    (options.search?.evaluations ?? (options.quality === "optimized" ? 1 : 0)) >
+      0
+      ? { passiveSkeletonAttempt: { started: false } }
+      : {}),
   };
   // T141: these edits are the ones a caller commits, so the connection gate
   // is measured on the document they actually deliver. R165 prepends its rail
@@ -1453,7 +1460,7 @@ function selectFinalLayout(
       kind,
     );
     best =
-      kind === "skeletonSa"
+      kind === "skeletonSa" || kind === "passiveSkeleton"
         ? guarded
         : preferIntact(document, resolver, guarded, candidate);
   }
@@ -3672,12 +3679,42 @@ function planAutoLayoutMeasured(
     );
   };
   const base = finishFinalist(selected, true);
+  const passiveSkeletonFinalist = (() => {
+    if (
+      options.finalists?.alternate ||
+      !options.passiveSkeletonAttempt ||
+      options.passiveSkeletonAttempt.started ||
+      stopped() ||
+      !passiveSkeletonDraftEligible(document, resolver, options) ||
+      stopped()
+    )
+      return;
+    options.passiveSkeletonAttempt.started = true;
+    const previous = [...runs.values()];
+    const run = route("passive-skeleton", emptyOverrides());
+    const candidate = runs.get(run.result)!;
+    const editKey = edits(candidate);
+    runs.delete(run.result);
+    if (
+      !run.final ||
+      stopped() ||
+      !Number.isFinite(routedScore(run, resolver)) ||
+      previous.some(
+        (c) =>
+          edits(c) === editKey ||
+          (c.run.final && !distinctPlacements(c.run.final, run.final!)),
+      )
+    )
+      return;
+    return candidate;
+  })();
   if (options.finalists && !options.finalists.alternate) {
     let pending = options.finalists.pending.get(document);
     if (!pending)
       options.finalists.pending.set(document, (pending = new Map()));
     const snapshot = copyResult(base);
     for (const [kind, candidate] of [
+      ["passiveSkeleton", passiveSkeletonFinalist],
       ["runner", alternateFinalist],
       ["convention", conventionFinalist],
       ["mcts", mctsFinalist],
@@ -3705,6 +3742,9 @@ function planAutoLayoutMeasured(
         options.finalists.available.set(kind, candidate.run);
     }
     pending.set(finalistKey, {
+      passiveSkeleton: passiveSkeletonFinalist
+        ? () => finishFinalist(passiveSkeletonFinalist, false)
+        : () => copyResult(snapshot),
       unsplitSymmetry:
         symmetryFinalist?.kind === "unsplitSymmetry"
           ? () =>
@@ -3754,19 +3794,37 @@ function planAutoLayoutMeasured(
         ? () => finishFinalist(localFinalist, false, { localLoopDraft: true })
         : () => copyResult(snapshot),
     });
-  } else if (skeletonSaFinalist && !stopped()) {
-    const candidate = finishFinalist(skeletonSaFinalist, false);
-    const before = finishedDocument(document, resolver, base);
-    const after = finishedDocument(document, resolver, candidate);
-    if (after && (!before || skeletonRoutingSafe(before, after, resolver)))
-      return selectFinishedLayout(
+  } else {
+    let best = base;
+    if (skeletonSaFinalist && !stopped()) {
+      const candidate = finishFinalist(skeletonSaFinalist, false);
+      const before = finishedDocument(document, resolver, best);
+      const after = finishedDocument(document, resolver, candidate);
+      if (after && (!before || skeletonRoutingSafe(before, after, resolver)))
+        best = selectFinishedLayout(
+          document,
+          resolver,
+          best,
+          candidate,
+          options.partition,
+          "skeletonSa",
+        );
+    }
+    if (passiveSkeletonFinalist && !stopped()) {
+      const before = finishLabels(best);
+      const after = finishLabels(
+        finishFinalist(passiveSkeletonFinalist, false),
+      );
+      best = selectFinishedLayout(
         document,
         resolver,
-        base,
-        candidate,
+        before,
+        after,
         options.partition,
-        "skeletonSa",
+        "passiveSkeleton",
       );
+    }
+    return best;
   }
   return base;
 }
@@ -4296,6 +4354,8 @@ function buildPlan(
     { ...document, layoutGroups: [] },
     roles,
   );
+  if (strategy === "passive-skeleton" && foldingStopped(options))
+    return refuse("R176: cancelled");
   const routed = routeDocument(
     routingInput.document,
     resolver,
