@@ -1741,7 +1741,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   facing a local gate port on a decoupled signal or private bias Net.
   Before column assignment, orient recognized left members by R92: outward
   `none`, inward `horizontal`. Other paired devices with a gate use
-  `horizontal` when the gate Net is self-mapped, otherwise `none`. Two-pin parts
+  `horizontal` when the gate Net is self-mapped or shared by both paired
+  members, otherwise `none`. Two-pin parts
   and axis devices keep R31 orientation except for cross-branch axis bridges.
   Centre each bridge on the axis and rotate it horizontally so its left pin
   faces the branch on its Net. Stack parallel bridges between the first two
