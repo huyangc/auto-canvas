@@ -3,12 +3,13 @@
    editor chrome design tokens and zero external network assets. */
 
 .notebook-gate {
-  min-height: 100dvh;
+  height: 100%;
+  max-height: 100dvh;
   width: 100%;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
   padding: var(--icm-space-6);
-  overflow: auto;
+  overflow-y: auto;
   color: var(--icm-text);
   background-color: var(--icm-chrome-bg);
   background-image: radial-gradient(
@@ -21,6 +22,8 @@
 
 .notebook-gate-card {
   width: min(400px, 100%);
+  margin: auto;
+  flex: 0 0 auto;
   padding: 28px 28px 24px;
   display: flex;
   flex-direction: column;
@@ -119,7 +122,7 @@
   padding: 0 16px;
   border: 1px solid transparent;
   border-radius: var(--icm-radius-md);
-  background: var(--icm-accent);
+  background: #1b72cc;
   color: #ffffff;
   font: inherit;
   font-size: 14px;
@@ -135,7 +138,7 @@
 }
 
 .notebook-gate-action:hover {
-  background: #1b72cc;
+  background: #165fa8;
   border-color: transparent;
   color: #ffffff;
   box-shadow: 0 4px 12px rgb(var(--icm-accent-rgb) / 28%);
