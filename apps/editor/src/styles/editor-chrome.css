@@ -789,6 +789,7 @@
    look stops at the dialog: `:where` keeps these selectors' specificity, so
    the overrides below still win. */
 .command-popover button:not(:where(.cloud-shelf-dialog *)),
+.command-popover a:not(:where(.cloud-shelf-dialog *)),
 .command-popover .file-import {
   display: inline-flex;
   align-items: center;
@@ -799,10 +800,22 @@
   border: 1px solid transparent;
   border-radius: 6px;
   box-shadow: none;
+  color: var(--icm-text);
+  background: var(--icm-surface);
   font-size: var(--icm-font-md);
   font-weight: 500;
   text-align: left;
+  text-decoration: none;
   white-space: nowrap;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.command-popover a:not(:where(.cloud-shelf-dialog *)):hover {
+  border-color: var(--icm-border-hover);
+  background: var(--icm-surface-hover);
 }
 
 .annotation-menu {

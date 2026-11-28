@@ -207,7 +207,6 @@ function ProjectNameLabel({
 }
 
 export interface EditorAppChromeProps {
-  analyticsHref?: string | undefined;
   projectTabs?: ReactNode;
   projectName: string;
   hasUnsavedWork: boolean;
@@ -249,7 +248,6 @@ export interface EditorAppChromeProps {
 
 /** Persistent command chrome above the document workspace. */
 export function EditorAppChrome({
-  analyticsHref,
   projectTabs,
   projectName,
   hasUnsavedWork,
@@ -416,19 +414,9 @@ export function EditorAppChrome({
             </button>
           ) : null}
           {/* The signed-in account ends the row and holds its Cloud
-              Projects; only an accounts-mode editor provides it, so local
-              mode and desktop render nothing. */}
-          {analyticsHref && (
-            <a
-              className="app-action"
-              href={analyticsHref}
-              rel="noopener"
-              target="_blank"
-              data-testid="open-analytics"
-            >
-              User Analytics
-            </a>
-          )}
+              Projects (plus User Analytics for administrators); only accounts
+              and notebook editors provide it, so local mode and desktop render
+              nothing. */}
           <HeaderAccountMenu
             {...(accountCloudProjects
               ? { cloudProjects: accountCloudProjects }
