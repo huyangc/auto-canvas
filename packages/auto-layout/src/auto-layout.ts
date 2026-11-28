@@ -27,6 +27,7 @@ import {
   shouldFinishRunner,
   type FinalistPass,
 } from "./finished-selection.js";
+import { improvesRouteGeometry, simplifyRoutes } from "./route-simplify.js";
 import { readabilityRegressed } from "./readability.js";
 import { generateCompacted2DCandidates } from "./compact-2d.js";
 import { generateFoldedCandidates, layoutAspectMetrics } from "./pack-rows.js";
@@ -112,6 +113,7 @@ import { timePhase, timePlanning } from "./timing.js";
 import {
   freezePinGroups,
   routeDocument,
+  rescueUnjoinedNets,
   repairBulkContactRoutes,
   routeVisibleBulkConnections,
   transferPowerClaims,
@@ -468,17 +470,19 @@ function planDocument(
           refined,
           finish,
         );
-        const compacted =
+        const searchMode =
           (options.search?.evaluations ??
-            (options.quality === "optimized" ? 1 : 0)) > 0
-            ? compactFinalist2D(document, resolver, options, folded, finish)
-            : folded;
+            (options.quality === "optimized" ? 1 : 0)) > 0;
+        const compacted = searchMode
+          ? compactFinalist2D(document, resolver, options, folded, finish)
+          : folded;
         return routeSelectedFinalist(
           document,
           resolver,
           options,
           compacted,
           finish,
+          searchMode,
         );
       }),
     ),
@@ -770,6 +774,7 @@ function routeSelectedFinalist(
   options: LevelOptions,
   incumbent: AutoLayoutResult,
   finish: (result: AutoLayoutResult) => AutoLayoutResult,
+  searchMode: boolean,
 ): AutoLayoutResult {
   const fellBackFromPartition = incumbent.diagnostics.some(
     (d) => d.code === "AUTO_LAYOUT_PARTITION_FALLBACK",
@@ -789,7 +794,7 @@ function routeSelectedFinalist(
   )
     return incumbent;
   let final = finishedDocument(source, resolver, incumbent);
-  if (!final || !auditRouting(final, resolver).crossings) return incumbent;
+  if (!final) return incumbent;
   const finishLabels = (result: AutoLayoutResult) =>
     separateLabels(
       source,
@@ -816,28 +821,12 @@ function routeSelectedFinalist(
         ),
       ),
     );
-  const negotiated = negotiateFinalist(
-    source,
-    resolver,
-    effectiveOptions,
-    incumbent,
-    final,
-    (result) => finish(finishLabels(result)),
-    stopped,
-  );
-  incumbent = negotiated.result;
-  final = negotiated.final;
-  if (stopped() || !auditRouting(final, resolver).crossings) return incumbent;
-  const priorEdits = incumbent.edits;
-  const rawSignals = rerouteCrossings(
-    source,
-    resolver,
-    { ...incumbent },
-    stopped,
-    final,
-    { deep: true },
-  );
-  const acceptFinishedSignals = (candidate: AutoLayoutResult) => {
+  const acceptFinishedSignals = (
+    candidate: AutoLayoutResult,
+    incumbent: AutoLayoutResult,
+    final: SchematicDocument,
+    simplifying = false,
+  ) => {
     const safeRaw = keepIntactReroute(source, resolver, incumbent, candidate);
     const finished = finishLabels(
       withDraftingTranslation(
@@ -850,10 +839,28 @@ function routeSelectedFinalist(
       ),
     );
     const after = finishedDocument(source, resolver, finished);
-    if (!after) return safeRaw;
+    const fallback = simplifying ? incumbent : safeRaw;
+    if (!after) return fallback;
     const beforeGuards = routedGuards(final, resolver);
     const afterGuards = routedGuards(after, resolver);
     if (
+      (simplifying &&
+        (finished.edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION ||
+          !improvesRouteGeometry(
+            auditRouting(final, resolver),
+            auditRouting(after, resolver),
+            final.presentation.grid,
+          ) ||
+          railCrossingMetrics(
+            after,
+            resolver,
+            classifyNets(after, resolver).rails,
+          ).violations >
+            railCrossingMetrics(
+              final,
+              resolver,
+              classifyNets(final, resolver).rails,
+            ).violations)) ||
       !connectionsIntact(after, resolver) ||
       auditRouting(after, resolver).unsafeProblems.length ||
       terminalPartition(final, resolver) !==
@@ -866,13 +873,70 @@ function routeSelectedFinalist(
         ([key, count]) => count > (beforeGuards[key] ?? 0),
       )
     )
-      return safeRaw;
+      return fallback;
     return keepIntactReroute(source, resolver, incumbent, finished);
   };
+  const simplify = (before: AutoLayoutResult, doc: SchematicDocument) => {
+    const raw = simplifyRoutes(source, resolver, before, stopped, doc);
+    if (raw === before) return before;
+    const accepted = acceptFinishedSignals(raw, before, doc, true);
+    const after =
+      accepted !== before && finishedDocument(source, resolver, accepted);
+    if (after)
+      retainRefinementMetrics(
+        { result: accepted, final: after, choices: emptyChoices() },
+        before,
+        resolver,
+      );
+    return accepted;
+  };
+  if (searchMode) {
+    const rescued = rescueUnjoinedNets(
+      source,
+      resolver,
+      incumbent,
+      final,
+      stopped,
+    );
+    if (rescued.result !== incumbent) {
+      withDraftingTranslation(rescued.result, draftingTranslation(incumbent));
+      retainRefinementMetrics(
+        { ...rescued, choices: emptyChoices() },
+        incumbent,
+        resolver,
+      );
+      incumbent = rescued.result;
+      final = rescued.final;
+    }
+  }
+  if (!auditRouting(final, resolver).crossings)
+    return searchMode && !stopped() ? simplify(incumbent, final) : incumbent;
+  const negotiated = negotiateFinalist(
+    source,
+    resolver,
+    effectiveOptions,
+    incumbent,
+    final,
+    (result) => finish(finishLabels(result)),
+    stopped,
+  );
+  incumbent = negotiated.result;
+  final = negotiated.final;
+  if (stopped() || !auditRouting(final, resolver).crossings)
+    return searchMode && !stopped() ? simplify(incumbent, final) : incumbent;
+  const priorEdits = incumbent.edits;
+  const rawSignals = rerouteCrossings(
+    source,
+    resolver,
+    { ...incumbent },
+    stopped,
+    final,
+    { deep: true },
+  );
   const signals =
     rawSignals.edits === priorEdits
       ? incumbent
-      : acceptFinishedSignals(rawSignals);
+      : acceptFinishedSignals(rawSignals, incumbent, final);
   const routed = finishedDocument(source, resolver, signals);
   if (signals !== incumbent && routed)
     retainRefinementMetrics(
@@ -880,30 +944,48 @@ function routeSelectedFinalist(
       incumbent,
       resolver,
     );
+  if (!routed || stopped()) return signals;
+  let current = signals;
+  let doc = routed;
+  const accept = (candidate: AutoLayoutResult) => {
+    if (candidate === current) return;
+    const after = finishedDocument(source, resolver, candidate);
+    if (!after) return;
+    retainRefinementMetrics(
+      { result: candidate, final: after, choices: emptyChoices() },
+      current,
+      resolver,
+    );
+    current = candidate;
+    doc = after;
+  };
   if (
-    !routed ||
-    stopped() ||
-    !auditRouting(routed, resolver).crossings ||
-    !railCrossingMetrics(routed, resolver, classifyNets(routed, resolver).rails)
+    auditRouting(doc, resolver).crossings &&
+    railCrossingMetrics(doc, resolver, classifyNets(doc, resolver).rails)
       .violations
   )
-    return signals;
-  const railed = keepIntactReroute(
-    source,
-    resolver,
-    signals,
-    rerouteRailCrossings(source, resolver, signals, stopped, finishReroute),
-  );
-  if (railed !== signals) {
-    const railedDoc = finishedDocument(source, resolver, railed);
-    if (railedDoc)
-      retainRefinementMetrics(
-        { result: railed, final: railedDoc, choices: emptyChoices() },
-        signals,
+    accept(
+      keepIntactReroute(
+        source,
         resolver,
-      );
+        current,
+        rerouteRailCrossings(source, resolver, current, stopped, finishReroute),
+      ),
+    );
+  if (!searchMode || stopped()) return current;
+  if (auditRouting(doc, resolver).crossings) {
+    const hanan = rerouteCrossings(
+      source,
+      resolver,
+      { ...current },
+      stopped,
+      doc,
+      { hanan: true },
+    );
+    if (hanan.edits !== current.edits)
+      accept(acceptFinishedSignals(hanan, current, doc));
   }
-  return railed;
+  return stopped() ? current : simplify(current, doc);
 }
 
 function negotiateFinalist(

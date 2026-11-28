@@ -2163,6 +2163,25 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   Optimized, successful partition, zero-budget and above-40-instance planning
   retain their prior behavior; R134 fallback uses plain planning's search.
 
+- **R175 — Hanan-grid A\* routing fallback and safe post-route wire simplification.**
+  Initial routing and blocker repair use the pattern router. Search and optimized
+  finishing retry physically incomplete base nets on the selected placement,
+  clearing generated fallback stubs and accepting only replayed improvements in
+  physical completeness with intact terminal partitions and safe geometry.
+  After negotiation, deep signal trunk trials and R148 rail rerouting, try a
+  trunk-free Hanan signal repair if crossings remain, then simplify the finished
+  wires even when crossings are zero. Quick planning skips these R175 passes.
+  The opt-in search follows sparse obstacle-clearance
+  and perimeter tracks, with at most 44 coordinates per axis and 2500 state
+  expansions. Every accepted path passes the same exact clearance check as the
+  default pattern router.
+  Finished layouts may simplify up to eight bent signal nets by rebuilding a
+  tree or shortcutting individual branches. Replay must preserve connectivity,
+  terminal partitions, name claims, body leads, rail crossing counts or better,
+  and readability. At equal crossings accept fewer bends with at most two grid
+  steps of added wire, or shorter wire with equal bends. Protected geometry,
+  buses, diagonals, rails and contact groups are excluded.
+
 - **R149 — Finished compactness and gap closing.** R146, R147 and R148
   add half the finished visible width plus height to their calibrated
   score. T059 refits crossings, bends, wire and visible span together against

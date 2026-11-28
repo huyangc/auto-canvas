@@ -102,10 +102,19 @@ export function rerouteCrossings(
   result: AutoLayoutResult,
   stopped: () => boolean,
   final?: SchematicDocument,
-  { deep = false } = {},
+  { deep = false, hanan = false } = {},
 ): AutoLayoutResult {
   if (final && !auditRouting(final, resolver).crossings) return result;
-  return rerouteNets(source, resolver, result, stopped, deep, undefined, final);
+  return rerouteNets(
+    source,
+    resolver,
+    result,
+    stopped,
+    deep || hanan,
+    undefined,
+    final,
+    hanan,
+  );
 }
 
 /** R148: reconsider crossed rails against the finished signal geometry. */
@@ -127,6 +136,7 @@ function rerouteNets(
   deep: boolean,
   finish?: (result: AutoLayoutResult) => AutoLayoutResult,
   final?: SchematicDocument,
+  hanan = false,
 ): AutoLayoutResult {
   const rails = !!finish;
   const limit = MAX_SCHEMATIC_EDITS_PER_TRANSACTION;
@@ -293,7 +303,11 @@ function rerouteNets(
         }
       | undefined;
     const reservedKey = JSON.stringify([...reserved]);
-    for (const trunk of trunkTracks(doc, resolver, coords, rails, deep)) {
+    const pathSearch = hanan ? "hanan-fallback" : "pattern";
+    const tracks = hanan
+      ? [undefined]
+      : trunkTracks(doc, resolver, coords, rails, deep);
+    for (const trunk of tracks) {
       if (stopped()) break;
       const request = {
         target: { kind: "pins" as const, pins: group.pins },
@@ -302,12 +316,13 @@ function rerouteNets(
       const routed = planningMemo(
         cleared.document,
         resolver,
-        `reroute-track:${reservedKey}:${JSON.stringify(request)}`,
+        `reroute-track:${pathSearch}:${reservedKey}:${JSON.stringify(request)}`,
         () => {
           try {
             return planRouteNet(cleared.document, resolver, request, limit, {
               netScope: "base",
               components: "physical",
+              pathSearch,
               crossingCost: 100 * doc.presentation.grid,
               reservedIds: reserved,
             });
