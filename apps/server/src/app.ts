@@ -223,7 +223,16 @@ function registerNotebook(
     ...identityOptions,
     onProfile: async (profile) => {
       await db.query(
-        "INSERT INTO users(id, display_name, last_role) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name, last_role = EXCLUDED.last_role",
+        `INSERT INTO users(id, display_name, last_role)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (id) DO UPDATE
+           SET display_name = EXCLUDED.display_name,
+               last_role = EXCLUDED.last_role,
+               first_seen_at = CASE
+                 WHEN users.preprovisioned THEN COALESCE(users.first_seen_at, now())
+                 ELSE users.first_seen_at
+               END,
+               preprovisioned = false`,
         [profile.id, profile.displayName, profile.isAdmin ? "admin" : "user"],
       );
     },

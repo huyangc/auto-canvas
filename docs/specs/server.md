@@ -203,15 +203,19 @@ Routes in this mode:
   administrators and cannot be revoked or modified in Canvas. Only Silicon
   Notebook administrators may grant or revoke Canvas-only administrator rights
   (`users.canvas_admin`) for other Silicon Notebook users via
-  `PATCH /api/admin/canvas-admins/:id` (`{canvasAdmin: boolean}`, returning 409
-  `notebook-admin-immutable` for Notebook admins and 409 `own-account` for the
-  caller) or pre-grant by Silicon Notebook username via
-  `POST /api/admin/canvas-admins` (`{username}`, resolved through
-  silicon-notebook's `GET /api/users/resolve`). Canvas-only administrators gain
-  live Canvas admin permissions immediately (access to `/canvas/analytics` in
-  read-only mode for admin management, component moderation, and direct
-  publishing/reviewing in public and joined group libraries) without gaining
-  any Silicon Notebook administrator privilege.
+  `PATCH /api/admin/canvas-admins/:id` (`{canvasAdmin: boolean}`, checking the
+  target's live Silicon Notebook role via `GET /api/admin/users` and returning
+  409 `notebook-admin-immutable` for Notebook admins and 409 `own-account` for
+  the caller) or pre-grant by Silicon Notebook username via
+  `POST /api/admin/canvas-admins` (`{username}`, resolved via
+  `GET /api/users/resolve` and verified against `GET /api/admin/users` with an
+  atomic conflict-safe upsert; newly pre-provisioned rows record `first_seen_at`
+  on their first real Canvas sign-in without altering legacy null-first-seen
+  users). Canvas-only administrators gain live Canvas admin permissions
+  immediately (access to `/canvas/analytics` in read-only mode for admin
+  management, component moderation, and direct publishing/reviewing in public
+  and joined group libraries) without gaining any Silicon Notebook
+  administrator privilege.
 - The Agent relay is off: no relay is constructed, `/api/agent` and
   `/api/agent/*` are 404 for every method, and WebSocket upgrades are answered
   `HTTP/1.1 404 Not Found`. `AUTO_CANVAS_AGENT_IDLE_MS` is not read.

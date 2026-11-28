@@ -145,6 +145,13 @@
   font-size: 12px;
 }
 
+.group-lib-notice-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .group-lib-error {
   padding: 8px 10px;
   border-radius: var(--icm-radius-sm);
