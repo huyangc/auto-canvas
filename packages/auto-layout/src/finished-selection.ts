@@ -22,6 +22,7 @@ type FinalistKind =
   | "runner"
   | "convention"
   | "mcts"
+  | "skeletonSa"
   | "unsplitSymmetry"
   | "mirrorSymmetry"
   | "localLoop"
@@ -169,6 +170,7 @@ export function rankedFinalists(pass: FinalistPass, resolver: SymbolResolver) {
       "runner",
       "convention",
       "mcts",
+      "skeletonSa",
       "unsplitSymmetry",
       "mirrorSymmetry",
       "localLoop",
@@ -211,6 +213,16 @@ export function selectFinishedLayout(
       !(routedScore(candidateRun, resolver) < routedScore(baseRun, resolver)))
   )
     return base;
+  if (kind === "skeletonSa") {
+    const afterAudit = auditRouting(after.document, resolver);
+    const beforeAudit = auditRouting(before.document, resolver);
+    if (
+      afterAudit.unsafeProblems.length > beforeAudit.unsafeProblems.length ||
+      (afterAudit.crossings > beforeAudit.crossings &&
+        compareCompleteness(candidateRun, baseRun, resolver) === 0)
+    )
+      return base;
+  }
   const improvesSymmetry =
     symmetryFinalist &&
     auditRouting(after.document, resolver).crossings <=

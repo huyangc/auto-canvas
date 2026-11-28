@@ -1428,6 +1428,25 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   (`<= 1.15x` when crossings drop), `wireLength <= 1.12x`,
   `crossings <= base`, and `compareRuns < 0`.
 
+- **R174 — Skeleton annealing draft.** In search mode, an unpartitioned
+  drawing with at least 12 devices, at most 120 instances and a transistor
+  may use this draft when it has no fixed devices, locked owners or hierarchical
+  pins. Start from the lower-energy legal layered or stage placement. Translate
+  rigid units and stage blocks, reflect free devices and seat free passives
+  toward connected pins. Within a symmetry component, shift or swap mirrored
+  sub-columns in opposite directions and reflect eligible single-device pairs
+  together. Keep rigid groups intact and retain two grid steps of body
+  clearance between devices that had that clearance in the seed. Preserve device rows, except for free passives,
+  and protect symmetry, grid alignment and directed-block orientation.
+  Score moves using estimated Manhattan tree length and crossings, channel
+  alignment, signal flow, row dispersion and bounding span. Calibrate the
+  seeded temperature from uphill costs, cool for 1,500 proposals, then try local pin alignments
+  for rigid units and mirrored pairs. Route only an improved draft.
+  Up to 40 instances, compare it as a guarded finished finalist. At equal
+  completeness the finished draft must preserve or reduce routed crossings. Larger
+  drawings require a distinct, competitive routed placement and protect
+  connectivity, visual guards and unsafe routing counts through finishing.
+
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.
   Use a 40-unit default seat up to 40 instances and 80 units above that,
