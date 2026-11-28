@@ -3,7 +3,7 @@ import { createRoutePath } from "@icm/model";
 import { placement, placementPitch } from "../src/geometry.js";
 import { expect, it, vi } from "vitest";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
-import { planAutoLayout } from "../src/auto-layout.js";
+import { defaultLayoutSearch, planAutoLayout } from "../src/auto-layout.js";
 import * as finishedSelection from "../src/finished-selection.js";
 import { emptyChoices } from "../src/layout-choices.js";
 import { classifyNets } from "../src/net-roles.js";
@@ -1428,4 +1428,76 @@ it("does not pull an asymmetric bias-column driver onto the symmetry axis", () =
   );
   expect(components[0]!.pairs).toContainEqual(["a", "b"]);
   expect(components[0]!.axis).toEqual(["t"]);
+});
+
+it("faces a diode-connected shared-gate cascode pair inward even when its gate maps to the mirrored drain", async () => {
+  const { placeDocument } = await import("../src/place.js");
+  const { recognizeStructures } = await import("../src/recognize.js");
+  const d = circuit(
+    {
+      pRef: "pmos",
+      pTail: "pmos",
+      pInL: "pmos",
+      pInR: "pmos",
+      nCasL: "nmos",
+      nCasR: "nmos",
+      nBotL: "nmos",
+      nBotR: "nmos",
+      vsup: "voltage-source",
+      gndMarker: "ground",
+    },
+    {
+      vdd: ["vsup.+", "pRef.S", "pTail.S"],
+      gnd: ["vsup.-", "gndMarker.0", "nBotL.S", "nBotR.S"],
+      pbias: ["pRef.D", "pRef.G", "pTail.G"],
+      tail: ["pTail.D", "pInL.S", "pInR.S"],
+      inL: ["pInL.G"],
+      inR: ["pInR.G"],
+      outL: ["pInL.D", "nCasL.D"],
+      diodeR: ["pInR.D", "nCasR.D", "nCasR.G", "nCasL.G"],
+      midL: ["nCasL.S", "nBotL.D"],
+      midR: ["nCasR.S", "nBotR.D", "nBotR.G", "nBotL.G"],
+    },
+  );
+  const roles = classifyNets(d, resolver);
+  const { components, netMap } = symmetryTopology(d, resolver, roles);
+  expect(components[0]!.pairs).toContainEqual(["nCasL", "nCasR"]);
+  expect(netMap.get("diodeR")).toBe("outL");
+
+  const placed = placeDocument(
+    d,
+    resolver,
+    roles,
+    recognizeStructures(d, roles),
+    {},
+    undefined,
+    undefined,
+    "layered",
+  );
+  expect(placed.problem).toBeUndefined();
+  expect([
+    placed.placements.get("nCasL")!.mirror,
+    placed.placements.get("nCasR")!.mirror,
+  ]).toEqual(["horizontal", "none"]);
+
+  const plan = planAutoLayout(d, resolver, {
+    search: defaultLayoutSearch(d),
+  });
+  expect(plan.diagnostics.filter((item) => item.severity === "error")).toEqual(
+    [],
+  );
+  const replay = preview(d, resolver, plan.edits);
+  expect(replay.ok).toBe(true);
+  if (!replay.ok) return;
+  const casL = replay.document.instances.find((i) => i.id === "nCasL")!;
+  const casR = replay.document.instances.find((i) => i.id === "nCasR")!;
+  const [left, right] =
+    casL.placement!.position.x < casR.placement!.position.x
+      ? [casL, casR]
+      : [casR, casL];
+  expect([left.placement!.mirror, right.placement!.mirror]).toEqual([
+    "horizontal",
+    "none",
+  ]);
+  expect(auditRouting(replay.document, resolver).crossings).toBe(0);
 });

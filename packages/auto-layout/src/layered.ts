@@ -591,9 +591,13 @@ function symmetryRows(
       const group = groups.find((g) => g.members.includes(left));
       const channel = channelPins(half.find((i) => i.id === left)!.symbolId);
       const gate = channel && roles.pinNet(left, channel.gate);
+      const rightGate = channel && roles.pinNet(right, channel.gate);
       if (group) p.mirror = facesOutward(group) ? "none" : "horizontal";
       else if (channel)
-        p.mirror = gate && netMap.get(gate) === gate ? "horizontal" : "none";
+        p.mirror =
+          gate && (netMap.get(gate) === gate || gate === rightGate)
+            ? "horizontal"
+            : "none";
     }
     for (const id of component.axis)
       halfRows.placements.get(id)!.position.y =
