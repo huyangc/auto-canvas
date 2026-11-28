@@ -70,6 +70,13 @@ describe("browser project workspace", () => {
     expect(workspaceRoute("/editor?project=cloud-1&example=bandgap")).toBe(
       "/editor",
     );
+    // Notebook/group circuit open requests are consumed and normalized away.
+    expect(workspaceRoute("/canvas/?group=grp-1&groupProject=gp-1")).toBe(
+      "/canvas?group=grp-1",
+    );
+    expect(workspaceRoute("/canvas/?notebook=nb-1&notebookProject=np-1")).toBe(
+      "/canvas?notebook=nb-1",
+    );
     // Unrelated query parameters still distinguish addresses.
     expect(workspaceRoute("/editor?project=cloud-1&workspace=other")).toBe(
       "/editor?workspace=other",

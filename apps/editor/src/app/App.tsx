@@ -513,6 +513,10 @@ export function App(props: AppProps) {
           // workspace without selecting its former deep-link target.
           new URLSearchParams(window.location.search).get("import") === "1" ||
             new URLSearchParams(window.location.search).has("project") ||
+            new URLSearchParams(window.location.search).has("groupProject") ||
+            new URLSearchParams(window.location.search).has(
+              "notebookProject",
+            ) ||
             new URLSearchParams(window.location.search).get("new") === "1" ||
             new URLSearchParams(window.location.search).get("resume") === "1",
         );
@@ -1002,9 +1006,6 @@ function WorkspaceEditor({
     groupId: string;
     projectId: string;
   } | null>(null);
-  const [pendingCloudProjectId, setPendingCloudProjectId] = useState<
-    string | null
-  >(null);
   useEffect(() => {
     if (!notebookUser || typeof window === "undefined") return;
     const url = new URL(window.location.href);
@@ -1012,13 +1013,11 @@ function WorkspaceEditor({
     const groupProject = url.searchParams.get("groupProject")?.trim();
     const notebook = url.searchParams.get("notebook")?.trim();
     const notebookProject = url.searchParams.get("notebookProject")?.trim();
-    const cloudProject = url.searchParams.get("project")?.trim();
     const view = url.searchParams.get("view")?.trim();
-    if (!group && !notebook && !cloudProject) return;
-    if (notebookProject || groupProject || cloudProject || view) {
+    if (!group && !notebook) return;
+    if (notebookProject || groupProject || view) {
       url.searchParams.delete("notebookProject");
       url.searchParams.delete("groupProject");
-      url.searchParams.delete("project");
       url.searchParams.delete("view");
       window.history.replaceState(
         null,
@@ -1038,10 +1037,6 @@ function WorkspaceEditor({
         groupId: group,
         projectId: groupProject,
       });
-      return;
-    }
-    if (cloudProject) {
-      setPendingCloudProjectId(cloudProject);
       return;
     }
     if (view === "components") setUserComponentsOpen(true);
@@ -5221,7 +5216,13 @@ function WorkspaceEditor({
       });
   }, [pendingNotebookProject, notebookUser, projectTabs, createTabSession]);
   useEffect(() => {
-    if (!pendingGroupProject || !notebookUser) return;
+    if (
+      !pendingGroupProject ||
+      !notebookUser ||
+      restoringWorkspace ||
+      restoreAfterRefresh
+    )
+      return;
     const { groupId, projectId } = pendingGroupProject;
     setPendingGroupProject(null);
     void fetch(
@@ -5255,19 +5256,13 @@ function WorkspaceEditor({
           `Could not open group circuit: ${error instanceof Error ? error.message : String(error)}`,
         );
       });
-  }, [pendingGroupProject, notebookUser, projectTabs, createTabSession]);
-  useEffect(() => {
-    if (!pendingCloudProjectId || !notebookUser || !projectStore) return;
-    if (!cloudProjectsReady) return;
-    const id = pendingCloudProjectId;
-    setPendingCloudProjectId(null);
-    void openCloudProjectById(id, true);
   }, [
-    pendingCloudProjectId,
+    pendingGroupProject,
     notebookUser,
-    projectStore,
-    cloudProjectsReady,
-    openCloudProjectById,
+    restoringWorkspace,
+    restoreAfterRefresh,
+    projectTabs,
+    createTabSession,
   ]);
 
   return (

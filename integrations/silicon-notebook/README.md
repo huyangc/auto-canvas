@@ -8,7 +8,7 @@ canvas beside it, under silicon-notebook's `/canvas` path:
 - `init-db.sh` — the one-time initialisation of the canvas database;
 - `plugin/` — the Python plugin package `silicon-notebook-auto-canvas`
   (bundle `silicon_notebook_auto_canvas.bundle:BUNDLE`, id
-  `auto_canvas.integration`, version 0.3.0). It has no backend
+  `auto_canvas.integration`, version 0.4.0). It has no backend
   contributions; the extensions TOML declares the canvas as its service, and
   it provides the capability `auto_canvas.integration.available` (always
   available, decided without I/O) that the workspace entry is gated on;
@@ -167,7 +167,7 @@ silicon-notebook shows the button only to users who may read the
 notebook, and only while its backend reports the plugin's entry available:
 with the plugin package installed and configured as in steps 6 and 7. The
 two halves are matched by plugin id, version and entry id: build with the UI
-package of the same checkout whose plugin package is installed (both 0.3.0);
+package of the same checkout whose plugin package is installed (both 0.4.0);
 after an upgrade, reinstall the plugin and rebuild, or the button does not
 render.
 

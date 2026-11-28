@@ -844,7 +844,7 @@ describe("the plugin package and the TOML examples", () => {
     expect(entry).toEqual({
       id: "auto_canvas.integration.entry",
       plugin_id: "auto_canvas.integration",
-      version: "0.3.0",
+      version: "0.4.0",
       capability: "auto_canvas.integration.available",
       slot: "workspace.side_panel",
       permission: "notebook:read",
