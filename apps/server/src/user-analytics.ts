@@ -6,10 +6,14 @@ type Mode = "accounts" | "notebook";
 
 const baseUsers = {
   accounts: `SELECT u.id, u.display_name, u.last_active_at, a.username, a.role,
+    false AS notebook_admin, false AS canvas_admin,
     a.disabled, a.must_change_password, a.created_at AS first_seen_at
     FROM standalone_accounts a JOIN users u ON u.id=a.user_id`,
   notebook: `SELECT u.id, u.display_name, u.last_active_at, NULL::text AS username,
-    coalesce(u.last_role,'user') AS role, false AS disabled, false AS must_change_password,
+    CASE WHEN coalesce(u.last_role,'user')='admin' OR u.canvas_admin THEN 'admin' ELSE 'user' END AS role,
+    (coalesce(u.last_role,'user')='admin') AS notebook_admin,
+    u.canvas_admin AS canvas_admin,
+    false AS disabled, false AS must_change_password,
     u.first_seen_at FROM users u LEFT JOIN standalone_accounts a ON a.user_id=u.id
     WHERE u.id <> 'local' AND a.user_id IS NULL`,
 };
@@ -21,7 +25,8 @@ const projectCount =
   "(SELECT count(*)::int FROM cloud_projects p WHERE p.user_id=u.id)";
 const componentCount =
   "(SELECT count(*)::int FROM components c WHERE c.author_id=u.id AND status <> 'deleted')";
-const summary = `SELECT u.id, username, display_name AS "displayName", role, disabled,
+const summary = `SELECT u.id, username, display_name AS "displayName", role,
+  notebook_admin AS "notebookAdmin", canvas_admin AS "canvasAdmin", disabled,
   must_change_password AS "mustChangePassword", first_seen_at AS "firstSeenAt",
   last_active_at AS "lastActiveAt", ${projectCount} AS "projectCount", ${componentCount} AS "componentCount",
   coalesce(w.days,0) AS "activeDaysInWindow", coalesce(w.actions,0) AS "actionsInWindow"

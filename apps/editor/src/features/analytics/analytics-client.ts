@@ -65,6 +65,8 @@ export interface AnalyticsUser {
   username: string | null;
   displayName: string;
   role: string;
+  notebookAdmin?: boolean;
+  canvasAdmin?: boolean;
   disabled: boolean;
   mustChangePassword: boolean;
   firstSeenAt: string | null;
@@ -148,6 +150,36 @@ export const updateAdminUser = (
   fetchLike = fetch,
 ) =>
   request<{ user: { id: string } }>(accountPath(id), fetchLike, "PATCH", patch);
+export const setCanvasAdmin = (
+  id: string,
+  canvasAdmin: boolean,
+  fetchLike = fetch,
+) =>
+  request<{
+    user: {
+      id: string;
+      displayName: string;
+      role: string;
+      notebookAdmin: boolean;
+      canvasAdmin: boolean;
+    };
+  }>(`canvas-admins/${encodeURIComponent(id)}`, fetchLike, "PATCH", {
+    canvasAdmin,
+  });
+export const grantCanvasAdminByUsername = (
+  username: string,
+  fetchLike = fetch,
+) =>
+  request<{
+    user: {
+      id: string;
+      username?: string;
+      displayName: string;
+      role: string;
+      notebookAdmin: boolean;
+      canvasAdmin: boolean;
+    };
+  }>("canvas-admins", fetchLike, "POST", { username });
 export const resetAdminUserPassword = (id: string, fetchLike = fetch) =>
   request<{ temporaryPassword: string }>(
     accountPath(id) + "/reset-password",

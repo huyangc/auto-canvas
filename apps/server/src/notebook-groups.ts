@@ -104,16 +104,20 @@ export function createNotebookGroups({
   fetch?: typeof globalThis.fetch;
   timeoutMs?: number;
 }): {
-  list(token: string, systemAdmin: boolean): Promise<NotebookGroupListResult>;
+  list(
+    token: string,
+    canvasAdmin: boolean,
+    notebookAdmin?: boolean,
+  ): Promise<NotebookGroupListResult>;
   resolve(
     token: string,
     groupId: string,
-    systemAdmin: boolean,
+    canvasAdmin: boolean,
   ): Promise<NotebookGroupResolveResult>;
   resolveNotebook(
     token: string,
     notebookId: string,
-    systemAdmin: boolean,
+    canvasAdmin: boolean,
   ): Promise<NotebookSpaceResolveResult>;
 } {
   const send = fetch ?? directNotebookGet;
@@ -158,12 +162,12 @@ export function createNotebookGroups({
   }
 
   return {
-    async list(token, systemAdmin) {
+    async list(token, canvasAdmin, notebookAdmin = canvasAdmin) {
       let result = await requestJson(
-        systemAdmin ? "/api/groups?scope=all" : "/api/groups?scope=mine",
+        notebookAdmin ? "/api/groups?scope=all" : "/api/groups?scope=mine",
         token,
       );
-      if (!result.ok && systemAdmin && result.status === 403)
+      if (!result.ok && notebookAdmin && result.status === 403)
         result = await requestJson("/api/groups?scope=mine", token);
       if (!result.ok)
         return {
@@ -173,7 +177,7 @@ export function createNotebookGroups({
       if (!Array.isArray(result.data)) return { ok: false, status: 503 };
       const groups: NotebookGroup[] = [];
       for (const item of result.data) {
-        const parsed = parseGroup(item, systemAdmin);
+        const parsed = parseGroup(item, canvasAdmin);
         if (parsed) groups.push(parsed);
       }
       return { ok: true, groups };

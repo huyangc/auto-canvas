@@ -19,6 +19,8 @@ export interface NotebookUser {
   provider: "notebook";
   role: string;
   isAdmin: boolean;
+  notebookAdmin?: boolean;
+  canvasAdmin?: boolean;
 }
 
 export type Identification =

@@ -12,6 +12,7 @@ interface Props {
   currentUserId: string;
   username: string;
   isAdmin: boolean;
+  canManageCanvasAdmins?: boolean;
   editorHref?: string;
   onSignOut?: () => void;
 }
@@ -29,6 +30,7 @@ function Dashboard({
   mode,
   currentUserId,
   username,
+  canManageCanvasAdmins = false,
   editorHref,
   onSignOut,
 }: Props) {
@@ -133,6 +135,7 @@ function Dashboard({
         {tab === "Users" && (
           <UsersPanel
             accounts={accounts}
+            canManageCanvasAdmins={!accounts && canManageCanvasAdmins}
             currentUserId={currentUserId}
             days={days}
             revision={revision}

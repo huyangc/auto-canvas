@@ -48,6 +48,13 @@
   flex-wrap: wrap;
 }
 
+.group-lib-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .group-lib-select {
   min-width: 180px;
   padding: 6px 10px;

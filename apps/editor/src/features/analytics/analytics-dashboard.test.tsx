@@ -60,12 +60,15 @@ const action = {
 async function mount(
   mode: "accounts" | "notebook" = "accounts",
   isAdmin = true,
+  canManageCanvasAdmins = false,
 ) {
   const member = {
     id: "member/id",
     username: "b12345678",
     displayName: "Member",
     role: "user",
+    notebookAdmin: false,
+    canvasAdmin: false,
     disabled: false,
     mustChangePassword: false,
     firstSeenAt: null,
@@ -81,6 +84,17 @@ async function mount(
     username: "a12345678",
     displayName: "My account",
     role: "admin",
+    notebookAdmin: mode === "notebook" && canManageCanvasAdmins,
+    canvasAdmin: mode === "notebook" && !canManageCanvasAdmins,
+  };
+  const peerNotebookAdmin = {
+    ...member,
+    id: "nb-admin-2",
+    username: null,
+    displayName: "Peer NB Admin",
+    role: "admin",
+    notebookAdmin: true,
+    canvasAdmin: false,
   };
   const calls: { url: URL; method: string; body: unknown }[] = [];
   let deleted = false;
@@ -127,7 +141,14 @@ async function mount(
         };
         break;
       case "analytics/users":
-        data = { users: deleted ? [self] : [self, member], total: 51 };
+        data = {
+          users: deleted
+            ? [self]
+            : mode === "notebook" && canManageCanvasAdmins
+              ? [self, peerNotebookAdmin, member]
+              : [self, member],
+          total: 51,
+        };
         break;
       case "analytics/users/member%2Fid":
         data = {
@@ -135,6 +156,25 @@ async function mount(
           daily: [{ day: "2026-01-01", okCount: 2, failedCount: 1 }],
           actions: [action],
         };
+        break;
+      case "canvas-admins":
+        data = {
+          user: {
+            id: "u-new-canvas-admin",
+            username: (body as { username: string }).username,
+            displayName: "New Canvas Admin",
+            role: "admin",
+            notebookAdmin: false,
+            canvasAdmin: true,
+          },
+        };
+        break;
+      case "canvas-admins/member%2Fid":
+        member.canvasAdmin = Boolean(
+          (body as { canvasAdmin?: boolean }).canvasAdmin,
+        );
+        member.role = member.canvasAdmin ? "admin" : "user";
+        data = { user: member };
         break;
       case "users/member%2Fid":
         if (method === "DELETE") {
@@ -165,6 +205,7 @@ async function mount(
         username={self.username}
         currentUserId="self"
         isAdmin={isAdmin}
+        canManageCanvasAdmins={canManageCanvasAdmins}
       />,
     ),
   );
@@ -301,8 +342,44 @@ it("uses notebook activity and inherited roles without account controls", async 
   expect(host.textContent).not.toContain("3 active sessions");
   await click("Users");
   expect(host.textContent).toContain("managed by silicon-notebook");
+  expect(host.textContent).toContain("Canvas Admin");
   expect(host.querySelector("fieldset")).toBeNull();
   expect(host.querySelector('option[value="disabled"]')).toBeNull();
+});
+it("lets Notebook admins manage Canvas-only admins while keeping Notebook admins immutable", async () => {
+  const { host, calls, click, button, set } = await mount(
+    "notebook",
+    true,
+    true,
+  );
+  await click("Users");
+  const peerRow = button("Peer NB Admin").closest("tr")!;
+  expect(peerRow.textContent).toContain("Notebook Admin");
+  expect(peerRow.textContent).toContain("Notebook admin (immutable)");
+  expect(peerRow.querySelector("fieldset")).toBeNull();
+
+  const memberRow = () => button("Member").closest("tr")!;
+  await click("Grant Canvas admin", memberRow());
+  expect(memberRow().textContent).toContain("Canvas Admin");
+  await click("Revoke Canvas admin", memberRow());
+  expect(calls.filter((c) => c.method === "PATCH").map((c) => c.body)).toEqual([
+    { canvasAdmin: true },
+    { canvasAdmin: false },
+  ]);
+
+  const usernameInput = host.querySelector<HTMLInputElement>(
+    'input[placeholder="Silicon Notebook username"]',
+  )!;
+  await set(usernameInput, "alice");
+  await click("Add Canvas admin");
+  expect(
+    calls.find(
+      (c) => c.method === "POST" && c.url.pathname.endsWith("/canvas-admins"),
+    )?.body,
+  ).toEqual({ username: "alice" });
+  expect(host.querySelector('[role="status"]')?.textContent).toContain(
+    "Granted Canvas admin to alice",
+  );
 });
 it("denies non-admin access without requesting analytics", async () => {
   const { host, calls } = await mount("notebook", false);

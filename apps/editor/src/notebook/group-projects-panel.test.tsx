@@ -141,4 +141,116 @@ describe("GroupProjectsPanel", () => {
 
     expect(mismatch).toHaveBeenCalledWith("public");
   });
+
+  it("batch uploads multiple circuit files and reports successes and partial failures", async () => {
+    const submitted: { name: string; projectText: string }[] = [];
+    const fetchMock = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (
+          url.endsWith("/notebook/groups") ||
+          url.includes("/notebook/groups?")
+        ) {
+          return jsonResponse({
+            groups: GROUPS.map((group) =>
+              group.id === "grp-public" ? { ...group, isAdmin: true } : group,
+            ),
+          });
+        }
+        if (url.includes("/projects") && init?.method === "POST") {
+          const payload = JSON.parse(String(init.body)) as {
+            name: string;
+            projectText: string;
+          };
+          submitted.push(payload);
+          if (payload.name === "broken") {
+            return jsonResponse({ error: "invalid-project" }, 400);
+          }
+          return jsonResponse(
+            {
+              project: {
+                id: `gp-${submitted.length}`,
+                groupId: "grp-public",
+                name: payload.name,
+                description: "",
+                authorId: "u-admin",
+                authorName: "Admin",
+                status: "approved",
+                reviewerId: "u-admin",
+                reviewerName: "Admin",
+                reviewNote: null,
+                createdAt: "2026-01-01T00:00:00Z",
+                updatedAt: "2026-01-01T00:00:00Z",
+              },
+            },
+            201,
+          );
+        }
+        if (url.includes("/projects")) {
+          return jsonResponse({
+            group: GROUPS[1],
+            projects: [],
+            pendingCount: 0,
+          });
+        }
+        return jsonResponse({}, 404);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+
+    await act(async () =>
+      root!.render(
+        <GroupProjectsPanel
+          groupVisibility="public"
+          onOpenGroupProject={vi.fn()}
+        />,
+      ),
+    );
+
+    const input = host.querySelector<HTMLInputElement>('input[type="file"]')!;
+    expect(input).not.toBeNull();
+    expect(input.multiple).toBe(true);
+
+    const makeFile = (content: string, name: string) => {
+      const file = new File([content], name, { type: "application/json" });
+      Object.defineProperty(file, "text", {
+        configurable: true,
+        value: async () => content,
+      });
+      return file;
+    };
+    const fileA = makeFile(
+      JSON.stringify({ name: "Bandgap Reference", schemaVersion: 1 }),
+      "bg_v1.icproj.json",
+    );
+    const fileB = makeFile("not-json", "broken.icproj.json");
+    const fileC = makeFile(
+      JSON.stringify({ schemaVersion: 1 }),
+      "LDO_Regulator.icproj.json",
+    );
+
+    await act(async () => {
+      Object.defineProperty(input, "files", {
+        configurable: true,
+        value: [fileA, fileB, fileC],
+      });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    expect(submitted.map((item) => item.name)).toEqual([
+      "Bandgap Reference",
+      "broken",
+      "LDO_Regulator",
+    ]);
+    expect(host.querySelector('[role="status"]')?.textContent).toContain(
+      "成功 2 个（2 个已入库），失败 1 个",
+    );
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+      "broken.icproj.json",
+    );
+  });
 });

@@ -189,6 +189,7 @@ describe("startServer", () => {
       "006-account-administration.sql",
       "007-group-shared-libraries.sql",
       "008-user-analytics.sql",
+      "009-canvas-admins.sql",
     ]);
   });
 
