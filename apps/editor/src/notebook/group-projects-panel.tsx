@@ -27,6 +27,7 @@ export interface GroupProjectsPanelProps {
   currentProject?: CircuitProject | undefined;
   groupVisibility?: "all" | "private" | "public" | undefined;
   initialGroupId?: string | null | undefined;
+  strictInitialGroup?: boolean | undefined;
   notebookId?: string | null | undefined;
   notebookName?: string | null | undefined;
   onSelectGroup?: ((groupId: string) => void) | undefined;
@@ -57,6 +58,7 @@ export function GroupProjectsPanel({
   currentProject,
   groupVisibility = "all",
   initialGroupId,
+  strictInitialGroup = true,
   notebookId,
   notebookName,
   onSelectGroup,
@@ -125,7 +127,7 @@ export function GroupProjectsPanel({
       } else if (initialGroupId) {
         if (list.some((item) => item.id === initialGroupId)) {
           nextGroupId = initialGroupId;
-        } else {
+        } else if (strictInitialGroup) {
           const matchedInAll = allGroups.find(
             (item) => item.id === initialGroupId,
           );
@@ -135,11 +137,9 @@ export function GroupProjectsPanel({
             );
             return;
           }
-          if (groupVisibility === "all") {
-            missingDeepLink = true;
-          } else {
-            nextGroupId = list[0]?.id ?? "";
-          }
+          missingDeepLink = true;
+        } else {
+          nextGroupId = list[0]?.id ?? "";
         }
       } else {
         nextGroupId = list[0]?.id ?? "";
@@ -166,6 +166,7 @@ export function GroupProjectsPanel({
     initialGroupId,
     isNotebookScope,
     onDeepLinkVisibilityMismatch,
+    strictInitialGroup,
   ]);
 
   useEffect(() => {

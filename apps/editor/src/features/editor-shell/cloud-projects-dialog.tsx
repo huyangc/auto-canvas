@@ -83,6 +83,24 @@ export function CloudProjectsDialog({
     if (initialGroupId) return "groups";
     return "personal";
   });
+  const [deepLinkGroupId, setDeepLinkGroupId] = useState<string | null>(() =>
+    hasNotebookLibraries && !initialScope && !activeNotebookId && initialGroupId
+      ? initialGroupId
+      : null,
+  );
+  const [autoRouteDeepLink, setAutoRouteDeepLink] = useState<boolean>(() =>
+    Boolean(
+      hasNotebookLibraries &&
+      !initialScope &&
+      !activeNotebookId &&
+      initialGroupId,
+    ),
+  );
+  const selectScope = useCallback((next: CloudProjectsScope) => {
+    setDeepLinkGroupId(null);
+    setAutoRouteDeepLink(false);
+    setScope(next);
+  }, []);
 
   const attachDialog = useCallback(
     (dialog: HTMLDialogElement | null) => {
@@ -178,7 +196,7 @@ export function CloudProjectsDialog({
               role="tab"
               className="notebook-scope-tab"
               aria-selected={scope === "personal"}
-              onClick={() => setScope("personal")}
+              onClick={() => selectScope("personal")}
             >
               我的电路库
             </button>
@@ -188,7 +206,7 @@ export function CloudProjectsDialog({
                 role="tab"
                 className="notebook-scope-tab"
                 aria-selected={scope === "notebook"}
-                onClick={() => setScope("notebook")}
+                onClick={() => selectScope("notebook")}
               >
                 当前笔记本电路库
               </button>
@@ -198,7 +216,7 @@ export function CloudProjectsDialog({
               role="tab"
               className="notebook-scope-tab"
               aria-selected={scope === "groups"}
-              onClick={() => setScope("groups")}
+              onClick={() => selectScope("groups")}
             >
               群组电路库
             </button>
@@ -207,7 +225,7 @@ export function CloudProjectsDialog({
               role="tab"
               className="notebook-scope-tab"
               aria-selected={scope === "public"}
-              onClick={() => setScope("public")}
+              onClick={() => selectScope("public")}
             >
               公共电路库
             </button>
@@ -244,11 +262,21 @@ export function CloudProjectsDialog({
               key={scope}
               currentProject={currentProject}
               groupVisibility={scope === "public" ? "public" : "private"}
-              initialGroupId={initialGroupId}
-              onSelectGroup={onSelectGroup}
-              onDeepLinkVisibilityMismatch={(visibility) => {
-                setScope(visibility === "public" ? "public" : "groups");
+              initialGroupId={deepLinkGroupId ?? initialGroupId}
+              strictInitialGroup={Boolean(deepLinkGroupId)}
+              onSelectGroup={(groupId) => {
+                setDeepLinkGroupId(null);
+                setAutoRouteDeepLink(false);
+                onSelectGroup?.(groupId);
               }}
+              onDeepLinkVisibilityMismatch={
+                autoRouteDeepLink
+                  ? (visibility) => {
+                      setAutoRouteDeepLink(false);
+                      setScope(visibility === "public" ? "public" : "groups");
+                    }
+                  : undefined
+              }
               onOpenGroupProject={handleOpenGroupProject}
             />
           </Suspense>
